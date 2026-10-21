@@ -1,0 +1,140 @@
+{
+  "skill": "migrating-php-apps",
+  "description": "Evaluation cases for real PHP migration decisions, safe data handling and protocol-specific constraints. Expected behaviors are test criteria, not completed results.",
+  "output_evals": [
+    {
+      "name": "Export a MySQL table for import",
+      "prompt": "Give me just the shell command to export the MySQL table `pages` (id, slug, title, body, published, updated_at) as JSON lines for importing into a Motoko canister. No backend code.",
+      "expected_behaviors": [
+        "Uses JSON_OBJECT (or an equivalent one-JSON-object-per-row query)",
+        "Passes --raw to the mysql/mariadb client together with --batch and --skip-column-names",
+        "Sets the client character set to utf8mb4",
+        "Converts updated_at with UNIX_TIMESTAMP and addresses the session time zone",
+        "Does NOT parse mysqldump INSERT statements"
+      ]
+    },
+    {
+      "name": "Optional values in Candid text",
+      "prompt": "I'm writing a Candid argument file for icp canister call. The field authorId has type ?Nat and the value is 7. Show just that field as Candid text.",
+      "expected_behaviors": [
+        "Writes authorId = opt (7 : nat) with the annotation inside parentheses, or opt 7 without an annotation",
+        "Does NOT write opt 7 : nat"
+      ]
+    },
+    {
+      "name": "Loading a large table",
+      "prompt": "Our MySQL news table has 80,000 rows. How should I get it into my Motoko backend canister? Keep it to the approach and the call loop, no frontend.",
+      "expected_behaviors": [
+        "Splits the rows into batches well under the 2 MB message limit",
+        "Imports through an update method restricted to controllers or an admin allowlist",
+        "Makes the import idempotent (upsert keyed by the legacy id) so a failed run can be repeated",
+        "Uses icp canister call with --args-file (or generated bindings) in a loop that stops on failure",
+        "Reconciles counts against SELECT COUNT(*) after importing"
+      ]
+    },
+    {
+      "name": "Old query-string URLs",
+      "prompt": "Our old PHP site has URLs like /index.php?page=contact and /news.php?id=12. We're moving the frontend to the @dfinity/static-site canister. How do we keep those links working? Just the approach and the config, no backend.",
+      "expected_behaviors": [
+        "States that _redirects cannot match query strings or capture path segments",
+        "Rewrites /index.php and /news.php (status 200) to a small page whose script maps the parameters to new paths",
+        "Recommends building pages at their old pretty paths and exact 301 rules for renamed paths",
+        "Does NOT propose :splat, :placeholder or query-string conditions in _redirects"
+      ]
+    },
+    {
+      "name": "Existing user accounts",
+      "prompt": "We're replacing the PHP login (users table with bcrypt hashes) with Internet Identity on ICP. What do we do with the existing accounts? No code, just the plan.",
+      "expected_behaviors": [
+        "Does not import or reuse the password hashes",
+        "Links legacy accounts only through verified proof (II verified_email or a one-time code from the old site), not a typed email",
+        "Warns that principals differ per origin and the final domain must be settled before users sign in (or derivationOrigin configured)",
+        "Mentions that canister memory on standard subnets is readable by node operators"
+      ]
+    },
+    {
+      "name": "Rendering pages from Motoko",
+      "prompt": "Can I just port our PHP templates so the Motoko canister renders HTML in http_request, like PHP did? One paragraph.",
+      "expected_behaviors": [
+        "Explains that Motoko can implement custom HTTP responses, including query-to-update delivery or suitable certified queries",
+        "Distinguishes the static-site recipe from protocol-wide capabilities",
+        "Discusses response integrity, application authentication and update latency; does not claim Motoko HTTP is impossible",
+        "Does not silently switch protected content to raw or skipped verification"
+      ]
+    },
+    {
+      "name": "Government data residency",
+      "prompt": "A municipality wants its migrated site's canisters to run on nodes in Europe. What's the deploy command? Just the command and one sentence of caveats.",
+      "expected_behaviors": [
+        "Uses icp deploy -e ic --subnet <subnet-id> (subnet chosen by node location on the ICP dashboard)",
+        "Notes that --subnet only affects canister creation",
+        "May mention a cloud engine (--engine) as the organization-owned alternative"
+      ]
+    },
+    {
+      "name": "Plugin export is not a finished application",
+      "prompt": "Our WordPress site uses Elementor, Contact Form 7, WooCommerce, ACF, Polylang and Yoast. The exporter produced HTML and extra JSON keys for languages/SEO. Is the migration finished? Give the remaining checks.",
+      "expected_behaviors": [
+        "Requires owner-approved capability decisions and live behavior tests for forms, commerce, publishing and permissions",
+        "Checks whether HTML still calls PHP/WordPress endpoints and treats a clean grep result as incomplete evidence",
+        "Maps languages, full URLs, translations, SEO and custom fields through schema/import/frontend rather than discarding them",
+        "Verifies builder assets/rendering context and protected content; does not claim universal plugin conversion"
+      ]
+    },
+    {
+      "name": "Protect exports and restricted content",
+      "prompt": "The WordPress project is served from public_html. Can I write exported users.jsonl there and render every published post into public static pages?",
+      "expected_behaviors": [
+        "Requires an export location outside every served document root",
+        "Separates published status from public access, including passwords, memberships and custom rules",
+        "Requires explicit public eligibility or an approved protected-data flow; does not publish restricted content or private identity exports"
+      ]
+    },
+    {
+      "name": "Legacy UUIDs and multiple roles",
+      "prompt": "Our records use UUID keys and users can have multiple custom roles. How should the example importer be adapted?",
+      "expected_behaviors": [
+        "Preserves actual UUID identifiers and relationships rather than forcing Nat",
+        "Preserves and deliberately maps all required roles/capabilities instead of selecting the first role or silently defaulting",
+        "Separates independent import row types from storage types and tests interface/state compatibility",
+        "Requires verified persistent principal-to-legacy-account linking for account access"
+      ]
+    },
+    {
+      "name": "Certified permission to skip verification",
+      "prompt": "Can an unimportant data route skip HTTP verification on the same origin as our sign-in app?",
+      "expected_behaviors": [
+        "Explains certified no_certification policy and exact/wildcard path scope; the replica cannot invent permission for protected routes",
+        "Explains that body/status/headers remain unauthenticated when permission is valid",
+        "Considers arbitrary executable content on the authenticated origin and keeps HTML/scripts/signing flows protected",
+        "Uses a narrow owner-approved policy only if impact is actually benign; does not blanket-enable a root wildcard"
+      ]
+    }
+  ],
+  "trigger_evals": {
+    "description": "Queries to test whether the skill activates correctly. 'should_trigger' queries should cause the skill to load; 'should_not_trigger' queries should NOT activate this skill.",
+    "should_trigger": [
+      "Move our WordPress site to the Internet Computer",
+      "Port this Laravel app to Motoko on ICP",
+      "We have an old PHP + MySQL municipal website, rebuild it on ICP with a Motoko backend",
+      "How do I get our company website off PHP and onto canisters?",
+      "Migrate our Joomla site and its MySQL data to the IC",
+      "Rehost our LAMP application on the Internet Computer",
+      "Import our MySQL database into a Motoko canister as part of moving off PHP",
+      "Keep our old .php URLs working after we move the site to ICP",
+      "Rewrite our PHP admin portal as a Motoko backend and deploy it",
+      "Our Drupal site went offline over the PHP vulnerability, help us move it to ICP"
+    ],
+    "should_not_trigger": [
+      "Write a todo app in Motoko",
+      "Add a field to my deployed Motoko actor's state",
+      "Patch PHP 8.2 for CVE-2026-109618",
+      "Convert this PHP function to Python",
+      "Deploy my React app to an ICP static site",
+      "Add Internet Identity login to my frontend",
+      "Migrate my dfx.json project to icp-cli",
+      "Move data between two of my Motoko canisters",
+      "Upgrade our WordPress plugins"
+    ]
+  }
+}

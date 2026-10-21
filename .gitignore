@@ -1,0 +1,10 @@
+*.pem
+*.key
+.env
+.env.*
+.icp/
+node_modules/
+work/
+attachment-merge-review.json
+PR_DESCRIPTION.md
+.DS_Store
