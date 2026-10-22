@@ -78,7 +78,7 @@ pages = {r["slug"]: r for r in rows if r["postType"] == "page"}
 print("drafts excluded:", "concept-beleid" not in pages)
 print("unicode intact:", pages["english"]["title"] == "Résidents & visitors – Ünïcode ✓ 🚲")
 print("tabs and backslashes intact:", "tabs\tand backslashes \\ here" in pages["english"]["bodyHtml"].replace("&#8217;", "'"))
-if "elementor" in plugins: print("page-builder page rendered:", len(pages["over-ons"]["bodyHtml"]) > 100)
+if "elementor" in plugins: print("page-builder page rendered:", len(pages["over-ons"]["bodyHtml"]) > 100 and "Welkom bij de gemeente" in pages["over-ons"]["bodyHtml"])
 if "polylang" in plugins: print("language exported:", pages["afval"].get("language") == "nl")
 if "contact-form-7" in plugins: print("contact form rendered (a feature, not content):", "<form" in pages["contact"]["bodyHtml"])
 print("no leftover shortcode syntax in fixture HTML:", not any(re.search(r'\[[A-Za-z][A-Za-z0-9_-]*(?:\s[^]]*)?/?\]', r["bodyHtml"]) for r in rows))

@@ -104,9 +104,14 @@ The supplied notes report checks on WordPress 7.1. The scoped exporter below has
         if (!setup_postdata($p)) throw new RuntimeException('Cannot establish post context.');
         $url = get_permalink($p);
         if (!is_string($url)) throw new RuntimeException('Cannot resolve source permalink.');
-        $html = class_exists('\Elementor\Plugin') && get_post_meta($id, '_elementor_edit_mode', true) === 'builder'
-          ? \Elementor\Plugin::$instance->frontend->get_builder_content_for_display($id, true)
+        $isBuilder = class_exists('\Elementor\Plugin') && get_post_meta($id, '_elementor_edit_mode', true) === 'builder';
+        // The source post is current; the template-display wrapper would reject it as recursive.
+        $html = $isBuilder
+          ? \Elementor\Plugin::$instance->frontend->get_builder_content($id, true)
           : apply_filters('the_content', $p->post_content);
+        if (!is_string($html) || ($isBuilder && trim($html) === '')) {
+          throw new RuntimeException("Builder snapshot for post $id is empty; inspect it before export.");
+        }
         yield ['legacyId' => $id, 'siteId' => get_current_blog_id(), 'siteUrl' => home_url('/'),
           'postType' => $p->post_type, 'url' => $url, 'route' => migration_route($url),
           'language' => function_exists('pll_get_post_language') ? pll_get_post_language($id) : null,
@@ -146,7 +151,7 @@ The supplied notes report checks on WordPress 7.1. The scoped exporter below has
   - *Contact Form 7:* forms are posts of type `wpcf7_contact_form` (fields in postmeta `_form`, recipients in `_mail`); the rendered `<form>` posts to `wp-json/contact-form-7`. Becomes a backend update method plus a page form; decide who receives the mail (`https-outcalls`).
   - *Yoast SEO:* raw per-page overrides in `_yoast_wpseo_title` and `_yoast_wpseo_metadesc` are exported above; canonical and social data may also use `wp_yoast_indexable`. Resolve templates/defaults and map required output into `<title>`, canonical, social and metadata tags; compare the original page head.
   - *Advanced Custom Fields:* values in postmeta under the field name (repeaters as `name_0_sub`, `name_1_sub`, ...) with a `_name` key reference beside each; `get_fields()` returns them structured (exported above) when the field groups are in the database or theme code. Each field becomes a record field.
-  - *Elementor and other page builders:* builder structure may live in metadata such as `_elementor_data`; `post_content` alone need not reproduce the page. The example uses Elementor's API for builder pages. Compare full pages, assets, templates, conditions and live controls in the actual request context; preserve required styles or restyle deliberately.
+  - *Elementor and other page builders:* builder structure may live in metadata such as `_elementor_data`; `post_content` alone need not reproduce the page. With the source post established as current, the example calls Elementor's direct `get_builder_content` API; its `get_builder_content_for_display` template wrapper deliberately returns empty for the current post. An empty builder snapshot stops the export for review. Compare full pages, assets, templates, conditions and live controls in the actual request context; preserve required styles or restyle deliberately.
   - *WooCommerce:* products are posts of type `product` with postmeta `_price`, `_sku`, `_stock_status` and the `wc_product_meta_lookup` table; orders in the `wc_orders*` tables (or posts of type `shop_order` on older sites); customers are users. The shop, cart, checkout and account pages export empty or as JavaScript-dependent markup. Catalog and content can move; checkout, payments, tax and stock are the owner decision under Magento's heading below.
   - *Polylang and WPML:* one post per language, linked by the `post_translations` taxonomy (Polylang) or the `icl_translations` table (WPML). Export the language and the links (the script does this for Polylang) and build one page per language at its own path.
   - *Wordfence, Akismet, caching and backup plugins:* identify the protections and operating duties they supply. Spam prevention, authorization, abuse handling, recovery and freshness may still be required. Replace, retain or retire each capability explicitly; removing PHP does not remove those responsibilities.

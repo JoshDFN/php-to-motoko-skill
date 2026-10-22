@@ -5,6 +5,7 @@ source "$(dirname "$0")/lib.sh"
 need shellcheck php python3 node curl git
 
 bash "$ROOT/tests/test-cli-output.sh"
+python3 "$ROOT/tests/test-wordpress-export.py"
 
 section "shell blocks (ShellCheck) and PHP blocks (php -l)"
 bad=0; total=0
