@@ -123,6 +123,8 @@ class ReadableExtension(Extension):
 
 def render(md_text, this_file):
     body = fm.sub("", md_text, count=1)
+    # Separate a closed fence from the next list item before SuperFences restores its HTML.
+    body = re.sub(r"(?m)^([ \t]*`{3,}[ \t]*)\n(?=[ \t]*[-*+]\s)", r"\1\n\n", body)
     readable = ReadableExtension(this_file)
     md = markdown.Markdown(extensions=["pymdownx.superfences", "tables", "toc", "sane_lists", readable],
                            extension_configs={"toc": {"toc_depth": "2-3", "slugify": heading_slug}}, output_format="html")
