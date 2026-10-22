@@ -14,11 +14,12 @@ DOC_DESCRIPTIONS = {
 }
 
 
-def move_page(title, html_body, toc, heading_id, raw_rel, nav, root, page_url, source_url, social_image):
+def move_page(title, html_body, toc, heading_id, raw_rel, nav, root, page_url, source_url, social_image, social_image_alt):
     page_title = html.escape(title + " · Move to Motoko", quote=True)
     description = html.escape(DOC_DESCRIPTIONS[raw_rel], quote=True)
     page_url = html.escape(page_url, quote=True)
     social_image = html.escape(social_image, quote=True)
+    social_image_alt = html.escape(social_image_alt, quote=True)
     source_url = html.escape(source_url, quote=True)
     heading_id = html.escape(heading_id or 'document-title', quote=True)
     return f"""<!DOCTYPE html>
@@ -26,8 +27,8 @@ def move_page(title, html_body, toc, heading_id, raw_rel, nav, root, page_url, s
 <title>{page_title}</title>
 <meta name="description" content="{description}"><link rel="canonical" href="{page_url}">
 <meta property="og:type" content="website"><meta property="og:site_name" content="Move to Motoko"><meta property="og:title" content="{page_title}"><meta property="og:description" content="{description}"><meta property="og:url" content="{page_url}">
-<meta property="og:image" content="{social_image}"><meta property="og:image:type" content="image/jpeg"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Move to Motoko. Move beyond the patch cycle. Start with the PHP migration skill.">
-<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="{page_title}"><meta name="twitter:description" content="{description}"><meta name="twitter:image" content="{social_image}"><meta name="twitter:image:alt" content="Move to Motoko. Move beyond the patch cycle. Start with the PHP migration skill.">
+<meta property="og:image" content="{social_image}"><meta property="og:image:type" content="image/jpeg"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="{social_image_alt}">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="{page_title}"><meta name="twitter:description" content="{description}"><meta name="twitter:image" content="{social_image}"><meta name="twitter:image:alt" content="{social_image_alt}">
 <link rel="icon" href="{root}/assets/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="{root}/assets/fonts.css"><link rel="stylesheet" href="{root}/assets/site.css">
 <link rel="stylesheet" href="{root}/skills/migrating-php-apps/docs.css"><script src="{root}/skills/migrating-php-apps/docs.js" defer></script></head>

@@ -38,6 +38,7 @@ class SiteMetadata(HTMLParser):
 
     canonical = ""
     social_image = ""
+    social_image_alt = ""
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
@@ -48,6 +49,8 @@ class SiteMetadata(HTMLParser):
                 self.canonical = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
         elif tag == "meta" and attrs.get("property") == "og:image":
             self.social_image = attrs.get("content", "")
+        elif tag == "meta" and attrs.get("property") == "og:image:alt":
+            self.social_image_alt = attrs.get("content", "")
 
 
 site_meta = SiteMetadata()
@@ -144,17 +147,39 @@ def page(title, html_body, toc, heading_id, raw_rel, current):
     canonical_url = urljoin(site_url, "skills/migrating-php-apps/" + page_path) if site_url else ""
     if move_to_motoko:
         social_image = urljoin(site_url, site_meta.social_image or "assets/move-to-motoko-social-v3.jpg")
-        return move_page(title, html_body, toc, heading_id, raw_rel, nav, root, canonical_url, SOURCE_URL, social_image)
+        return move_page(title, html_body, toc, heading_id, raw_rel, nav, root, canonical_url, SOURCE_URL, social_image, site_meta.social_image_alt)
     canonical = f'<link rel="canonical" href="{html.escape(canonical_url, quote=True)}">' if canonical_url else ""
+    page_title = html.escape(title + " · migrating-php-apps · PHP to Motoko", quote=True)
     description = html.escape(DOC_DESCRIPTIONS[raw_rel], quote=True)
+    social_meta = f'''<meta property="og:type" content="website">
+<meta property="og:site_name" content="PHP to Motoko">
+<meta property="og:title" content="{page_title}">
+<meta property="og:description" content="{description}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{page_title}">
+<meta name="twitter:description" content="{description}">'''
+    if canonical_url:
+        social_meta += f'\n<meta property="og:url" content="{html.escape(canonical_url, quote=True)}">'
+    if site_meta.social_image:
+        social_image = html.escape(urljoin(site_url, site_meta.social_image), quote=True)
+        social_image_alt = html.escape(site_meta.social_image_alt, quote=True)
+        social_meta += f'''
+<meta property="og:image" content="{social_image}">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="{social_image_alt}">
+<meta name="twitter:image" content="{social_image}">
+<meta name="twitter:image:alt" content="{social_image_alt}">'''
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{html.escape(title)} · migrating-php-apps · PHP to Motoko</title>
+<title>{page_title}</title>
 <meta name="description" content="{description}">
 {canonical}
+{social_meta}
 <link rel="icon" href="{root}/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="{root}/assets/fonts.css">
 <link rel="stylesheet" href="{root}/assets/site.css">
