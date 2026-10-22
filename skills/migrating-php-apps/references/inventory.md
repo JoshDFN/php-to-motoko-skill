@@ -6,19 +6,18 @@ Read-only. Run it at the root of the PHP project (or pass the path) and keep the
 bash php-inventory.sh /path/to/php-site > inventory.md
 ```
 
-Requires `bash`, `find`, `grep`, `du`, `awk`; `python3` for the Composer summary. The helper scans PHP source extensions, including Drupal `.module`, `.theme`, `.install`, `.profile` and `.engine` files. It lists installed extensions without executing CMS code; the CLI commands it prints are follow-up suggestions only. Tested on synthetic plain-PHP, Composer Drupal and WordPress fixtures, including paths containing spaces and dummy configuration secrets.
+Requires `bash`, `find`, `grep`, `du`, `awk`, and `python3` for the Composer summary. It scans PHP sources, including Drupal `.module`, `.theme`, `.install`, `.profile` and `.engine` files, lists installed extensions without executing CMS code, and only prints follow-up CLI commands. Tested on plain-PHP, Composer Drupal and WordPress fixtures, including paths with spaces and dummy secrets.
 
 ```bash
 #!/usr/bin/env bash
-# Inventory a PHP codebase before moving it to the Internet Computer.
-# Read-only. Prints Markdown. Never prints secret values, only file and key names.
+# Read-only PHP inventory as Markdown; prints key names, never secret values.
 # Usage: bash php-inventory.sh [path-to-php-repo] > inventory.md
 set -u
 ROOT="${1:-.}"
 cd "$ROOT" || exit 1
 PRUNE=(-path ./vendor -prune -o -path ./node_modules -prune -o -path ./.git -prune -o)
 
-# NUL-delimited paths keep spaces and shell metacharacters intact; do not eval paths.
+# NUL-delimited paths; never eval them.
 files() { find . "${PRUNE[@]}" -type f \( "$@" \) -print0 2>/dev/null; }
 php_files() { files -name '*.php' -o -name '*.phtml' -o -name '*.inc' -o -name '*.module' -o -name '*.theme' -o -name '*.install' -o -name '*.profile' -o -name '*.engine'; }
 hits() { # $1 = label, $2 = extended regex
@@ -38,7 +37,7 @@ echo "# PHP inventory: $(basename "$(pwd)")"
 echo
 echo "## Platform"
 fw="plain PHP"; DOCROOT="."
-# Composer layouts keep the web root in a subdirectory (Drupal's web/ or docroot/, Bedrock's web/)
+# Composer layouts: web root in web/ or docroot/
 for d in . web docroot public_html htdocs; do
   { [ -f "$d/wp-config.php" ] || [ -f "$d/wp-includes/version.php" ]; } && { fw="WordPress"; DOCROOT="$d"; }
   [ -f "$d/core/lib/Drupal.php" ] && { fw="Drupal"; DOCROOT="$d"; }
@@ -51,7 +50,7 @@ done
 echo "- Detected: **$fw**"
 [ "$DOCROOT" != "." ] && echo "- Web root: \`$DOCROOT/\` (Composer layout: the project root holds composer.json, vendor/ and config outside the web root)"
 R="."; [ "$DOCROOT" != "." ] && R="./$DOCROOT"
-# Skip the platform's own code: it is replaced, not migrated. Your code lives in the custom directories.
+# Platform core is replaced, not migrated: inventory only custom code.
 CORE=(); CUSTOM=''; ROOTSKIP='^$'
 case "$fw" in
   WordPress) CORE=(-path "$R/wp-admin" -prune -o -path "$R/wp-includes" -prune -o); CUSTOM="$DOCROOT/wp-content/themes, $DOCROOT/wp-content/plugins, $DOCROOT/wp-content/mu-plugins"; ROOTSKIP="^$R/(wp-[a-z-]+|xmlrpc|index)\\.php\$" ;;

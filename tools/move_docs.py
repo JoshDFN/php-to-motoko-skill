@@ -5,6 +5,7 @@ import html
 DOC_DESCRIPTIONS = {
     "SKILL.md": "The six-phase PHP migration workflow: inventory, plan, rebuild, reconcile data, reconnect users and verify cutover on the Internet Computer.",
     "references/inventory.md": "Read-only inventory guidance for mapping an existing PHP application before planning its move to Motoko and the Internet Computer.",
+    "references/capability-map.md": "Map each existing application feature to its planned migration, owner decision and verification evidence.",
     "references/data-import.md": "Back up, export, convert, import and reconcile application data during a planned PHP-to-Motoko migration.",
     "references/backend-example.md": "A tested Motoko backend example for content storage, data imports and access checks to adapt to an application's migration plan.",
     "references/old-urls.md": "Preserve established URLs with redirect rules, legacy route mapping and checks for each old link during migration.",

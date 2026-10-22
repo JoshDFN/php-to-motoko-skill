@@ -12,7 +12,7 @@ metadata:
 
 ## What This Is
 
-Move a running PHP application, its data, users and URLs to the Internet Computer. Historical tests cover specific scenarios; verify the actual features and integrations. Default architecture:
+Move a running PHP application, its data, users and URLs to the Internet Computer. Default architecture:
 
 ```text
 Browser ── HTTPS ──> HTTP gateway ──> frontend canister (@dfinity/static-site, certified-assets)
@@ -23,9 +23,9 @@ Sign-in: Internet Identity    Scheduled jobs: timers    Outbound APIs: HTTPS out
 Domain: custom-domains        No PHP runtime, web server, database server or OS left to patch
 ```
 
-The static-site canister certifies a **finite set of files** ahead of time. Build pages ahead of time or render them in the browser from backend data. For request-time Motoko HTTP, choose and test certified queries or query-to-update delivery using [`references/delivery.md`](references/delivery.md). Read its integrity constraints before considering certification opt-outs.
+The static-site canister certifies a **finite set of files** ahead of time: build pages ahead of time or render them in the browser from backend data. For request-time Motoko HTTP (certified queries or query-to-update), see [`references/delivery.md`](references/delivery.md). Read its integrity constraints before considering certification opt-outs.
 
-This skill orchestrates the migration. Load these skills for the details it delegates: `writing-motoko` (all Motoko code), `migrating-motoko-actors` (state changes after go-live), `mops-cli`, `icp-cli`, `static-site`, `internet-identity`, `canister-security`, `https-outcalls`, `custom-domains`, `cycles-management`; and when relevant `multi-canister` (data beyond one canister), `vetkeys` / `encrypted-maps` (data that must stay confidential), `deploy-to-cloud-engine` and `cloud-engine-canisters` (organization-owned capacity).
+Load these skills for the details this one delegates: `writing-motoko` (all Motoko code), `migrating-motoko-actors` (state changes after go-live), `mops-cli`, `icp-cli`, `static-site`, `internet-identity`, `canister-security`, `https-outcalls`, `custom-domains`, `cycles-management`; and when relevant `multi-canister` (data beyond one canister), `vetkeys` / `encrypted-maps` (data that must stay confidential), `deploy-to-cloud-engine` and `cloud-engine-canisters` (organization-owned capacity).
 
 ## Prerequisites
 
@@ -69,11 +69,14 @@ Then collect what the script cannot see:
     `table_rows` is an estimate for InnoDB; reconcile against `SELECT COUNT(*)`.
 
 - **The URLs that matter**: `sitemap.xml`, the CMS's URL/alias table (see [`references/frameworks.md`](references/frameworks.md)), and the most-requested paths from the access log: `awk '{print $7}' access.log | sort | uniq -c | sort -rn | head -2000` (common/combined log format).
+- **Every kind of data**: content, users, form submissions, comments, uploads, settings. Migrate or archive each.
 - **Logged-in and admin journeys**: a public URL never shows private logic, roles or data. Read the code for them.
 
 For WordPress, Drupal, Joomla, Magento, Laravel and Symfony, read [`references/frameworks.md`](references/frameworks.md) now: where content, users, URLs and schedules live, and the platform-specific traps (serialized PHP values, EAV tables, shortcodes).
 
 ## Phase 2: Plan What Moves Where
+
+Map every feature with [`references/capability-map.md`](references/capability-map.md); one with no row is an owner decision, never dropped.
 
 | On the PHP site | On the Internet Computer | Watch out for |
 |-----------------|--------------------------|---------------|
@@ -95,15 +98,15 @@ For WordPress, Drupal, Joomla, Magento, Laravel and Symfony, read [`references/f
 **Choose the target with the owner:**
 
 - **A. All on ICP (default):** frontend and backend canisters, the existing domain pointed at the frontend.
-- **B. Keep the existing frontend host:** the rebuilt static frontend stays on the owner's host or CDN and calls the Motoko backend on ICP; verify cross-origin calls for the selected deployment. Without the `ic_env` cookie the canister id is page configuration; on mainnet pass no host or root key, locally take both from `icp network status --json`. The external host can change the JavaScript that talks to the backend, so it stays an integrity dependency, and it is the Internet Identity origin (Phase 5).
+- **B. Keep the existing frontend host:** the rebuilt static frontend stays on the owner's host or CDN and calls the Motoko backend on ICP (verify cross-origin calls). Without the `ic_env` cookie the canister id is page configuration; on mainnet pass no host or root key, locally take both from `icp network status --json`. The external host serves the JavaScript that calls the backend, so it remains an integrity dependency and the Internet Identity origin (Phase 5).
 
-**Choose where it runs:** `icp deploy -e ic` picks an application subnet. For data-residency rules, create the canisters with `--subnet <subnet-id>` on a subnet whose node locations fit (ICP dashboard); the flag only affects creation. For an organization's own cloud engine, `--engine <engine-name>` with `deploy-to-cloud-engine` and `cloud-engine-canisters` loaded (engines charge no cycles; never attach cycles there).
+**Choose where it runs:** `icp deploy -e ic` picks an application subnet. For data residency, create the canisters with `--subnet <subnet-id>` on a subnet whose node locations fit (ICP dashboard; creation only). For an organization's own cloud engine, use `--engine <engine-name>` with `deploy-to-cloud-engine` and `cloud-engine-canisters` (engines charge no cycles; never attach any).
 
 Present the feature map, the target and the gaps; get sign-off.
 
 ## Phase 3: Build
 
-Scaffold with `icp-cli` and `mops-cli`. Follow the file layout and rules of `writing-motoko` (`types.mo`, `lib/`, `mixins/`, `main.mo`, a `migrations/` chain). [`references/backend-example.md`](references/backend-example.md) demonstrates content imports and public reads, not a complete CMS or plugin system. Adapt it to the application; historical local test reports do not establish that a new migration passes. Its example `icp.yaml`:
+Scaffold with `icp-cli` and `mops-cli`. Follow the file layout and rules of `writing-motoko` (`types.mo`, `lib/`, `mixins/`, `main.mo`, a `migrations/` chain). [`references/backend-example.md`](references/backend-example.md) is a tested starting point (imports, reads, forms, search, read-back), not a complete CMS: adapt it. Its example `icp.yaml`:
 
 ```yaml
 canisters:
@@ -165,13 +168,13 @@ Full commands and the converter are in [`references/data-import.md`](references/
     done
     ```
 
-5. **Reconcile:** counts from `importCounts` against `SELECT COUNT(*)` per table; spot-check records containing accents, emoji, quotes, tabs and backslashes; compare SHA-256 hashes of migrated files. Keep the results for the hand-over.
+5. **Reconcile every record, not counts** (counts hide empty bodies): read everything back through the controller-only export (`references/backend-example.md`); compare every field with the source export and every file's SHA-256 with the frontend's `get_asset_details`. Done means zero differences.
 6. **Snapshot** the populated backend before anything risky: `icp canister stop backend -e ic && icp canister snapshot create backend -e ic && icp canister start backend -e ic`.
 
 ## Phase 5: Users and Sign-In
 
 - **Do not import password hashes.** Internet Identity cannot use them, and canister memory on standard application subnets is readable by node operators. Import identity data only (legacy id, email, display name, role).
-- **Decide the final domain before real users sign in.** Internet Identity derives a different principal per origin. It treats `ic0.app`, `icp0.io` and `icp.net` as one origin, but a custom domain is a different one, and so is the external host in target B. Moving origins later needs `derivationOrigin` (`internet-identity`, "Serving an app at more than one origin").
+- **Decide the final domain before real users sign in.** Internet Identity derives a different principal per origin. It treats `ic0.app`, `icp0.io` and `icp.net` as one origin, but a custom domain is a different one, and so is the external host in target B. Moving origins later needs `derivationOrigin` (`internet-identity`).
 - **Link legacy accounts only with verified proof**, never an email the user merely typed: either the Internet Identity `verified_email` attribute matches the imported address (not `email`, which II does not verify; SSO emails only for domains you list), or a one-time code shown on the old site while both run. See `internet-identity` for attribute verification in the backend.
 - **Staff and editors:** organization SSO through Internet Identity (`ssoDomain`), or an explicit principal allowlist that only controllers can change.
 
@@ -179,11 +182,11 @@ Full commands and the converter are in [`references/data-import.md`](references/
 
 1. Deploy to the chosen network, subnet or engine; fund it (`cycles-management`, `buy-cycles`). Commit `.icp/data/mappings/ic.ids.json`: it holds the canister IDs.
 2. Run the new site side by side at `https://<frontend-id>.icp.net`. To keep a preview private, use the static-site access protection.
-3. With the owner's go-ahead, **freeze writes** on the old site (maintenance or read-only mode), re-run the export and import (a full re-run is safe; or only rows changed since the last export), and reconcile again.
+3. With the owner's go-ahead, **freeze writes** on the old site (maintenance or read-only mode), re-run the export and import (a full re-run is safe; or only rows changed since the last export), and reconcile again until zero differences (messages and edits from the migration window are the usual loss).
 4. Snapshot the backend.
 5. Add `.well-known/ic-domains` to the frontend `dir`, register the domain (`custom-domains`), then, with the owner's go-ahead, switch DNS.
 6. **Verify live on the real domain:** every journey in the feature map, sign-in, forms, uploads, old URLs (pretty paths, renamed paths, query-string URLs), the 404 page, and an upgrade of the backend with production data in place.
-7. Keep the old stack read-only and patched for the agreed rollback window, then decommission it and securely delete exports that contain personal data.
+7. Keep the old stack read-only and patched for the agreed rollback window, then decommission it and securely delete exports that contain personal data. Keep running the read-back export as an off-site backup.
 
 **Rollback is two different things.** Redeploying old code does not undo data changes. To return the backend to a known state, stop it and run `icp canister snapshot restore backend <snapshot-id> -e ic`, then start it.
 
@@ -198,7 +201,7 @@ Full commands and the converter are in [`references/data-import.md`](references/
 
 ## Hand-Over Evidence
 
-Deliver: live URL(s); canister IDs, network and subnet or engine; source location and the exact build, deploy and import commands; the feature map with evidence per row; reconciliation results; test results, including the populated-state upgrade; controllers and backup controller; cycles balance and monitoring; snapshot IDs and the rollback procedure; and a list of every gap and intentional difference. If access, funding or an owner decision blocks deployment, finish all independent work and name the exact blocker; never report an undeployed build as done.
+Deliver: live URLs; canister IDs with network and subnet or engine; source location and exact build, deploy and import commands; the feature map with evidence per row; the reconciliation report; test results, including the populated-state upgrade; controllers and backup controller; cycles balance and monitoring; snapshot IDs and the rollback procedure; and a list of every gap and intentional difference. If access, funding or an owner decision blocks deployment, finish all independent work and name the exact blocker; never report an undeployed build as done.
 
 ## Pitfalls
 
@@ -218,7 +221,7 @@ Deliver: live URL(s); canister IDs, network and subnet or engine; source locatio
 14. **Leaving `--default-persistent-actors` in `[moc] args` on moc 2.x.** Actors are persistent by default from moc 2.0.0 and the flag was removed, so the build fails. Keep it only on moc 1.x, where the `icp new` template sets it.
 15. **Replicated POST outcalls to email or payment APIs.** Every replica sends the request. Use an idempotency key or a non-replicated outcall (`https-outcalls`).
 16. **Assuming default security headers.** The static-site canister adds none; declare them in `_headers`.
-17. **Reporting success from exit codes.** An importer that exits 0 has not proven the data is right. Reconcile counts, spot-check records and verify journeys on the live origin.
+17. **Reporting success from exit codes.** Exit status 0 proves nothing about the data: reconcile every record (Phase 4) and verify journeys on the live origin.
 18. **Local security tests can lie.** A fresh icp-cli deploys as `anonymous`, then the only controller, so anonymous calls pass `caller.isController()` locally. Hand the canister to a named identity first (`icp canister settings update backend --add-controller <dev> --remove-controller 2vxsx-fae -e local`).
 
 License: [Apache-2.0](LICENSE.txt).

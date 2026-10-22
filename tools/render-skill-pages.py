@@ -28,7 +28,7 @@ skill, out = args.skill, args.out
 fm = re.compile(r"\A---\r?\n(.*?)\r?\n---(?:\r?\n|$)", re.S)
 SOURCE_URL = "https://github.com/JoshDFN/php-to-motoko-skill"
 
-REFS = [("inventory.md", "Inventory script"), ("data-import.md", "Data export and import"), ("backend-example.md", "Tested backend example"),
+REFS = [("inventory.md", "Inventory script"), ("capability-map.md", "Capability map"), ("data-import.md", "Data export and import"), ("backend-example.md", "Tested backend example"),
         ("old-urls.md", "Keeping old URLs"), ("frameworks.md", "Platform notes"), ("delivery.md", "Dynamic delivery")]
 PAGES = {"SKILL.md": "index.html", **{"references/" + name: "references/" + name[:-3] + ".html" for name, _ in REFS}}
 

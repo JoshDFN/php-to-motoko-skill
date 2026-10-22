@@ -20,7 +20,7 @@ Platform versions and historical checks in these notes are reported by the suppl
 
 The examples below capture selected content and identity data for review. They are not universal CMS exporters or evidence that plugins, permissions or live workflows have migrated. Run them on an owner-approved copy using the relevant CMS CLI. Rendering invokes installed plugin/module code; inspect that code and its side effects first.
 
-Save this helper as `export-support.php` beside the selected exporter in a private working directory outside the web root. Set `MIGRATION_EXPORT_DIR` to an absolute, **new** directory whose parent already exists on private storage. Set `MIGRATION_WEB_ROOTS` to the absolute roots of every directory published by the web server, separated by `PATH_SEPARATOR` (`:` on Linux/macOS), including upload aliases. At least one root must contain the CMS root. The helper rejects output beneath those roots, creates a fresh directory with mode 0700, and writes files with mode 0600. It cannot discover web-server aliases: confirm the chosen storage is not served by any host. Never deploy this directory as frontend assets.
+Save this helper as `export-support.php` beside the exporter, in a private directory outside the web root. Set `MIGRATION_EXPORT_DIR` to an absolute, **new** directory on private storage (its parent must exist), and `MIGRATION_WEB_ROOTS` to every directory the web server publishes, including upload aliases, separated by `PATH_SEPARATOR` (`:` on Linux/macOS); one must contain the CMS root. The helper refuses output beneath them and writes a fresh 0700 directory with 0600 files. It cannot see web-server aliases: confirm no host serves the storage, and never deploy it as frontend assets.
 
 ```php
 <?php
@@ -85,7 +85,7 @@ The supplied notes report checks on WordPress 7.1. The scoped exporter below has
 
 - **Prefix:** `$table_prefix` in `wp-config.php` (default `wp_`). Use the real prefix in every query.
 - **Content:** `wp_posts`. Filter `post_type IN ('post', 'page')` (plus any custom types the site uses) and `post_status = 'publish'`; `post_name` is the slug, `post_date_gmt` / `post_modified_gmt` are UTC. Rows with `post_type = 'revision'`, `'attachment'` or `'nav_menu_item'` are not pages.
-- **Rendered HTML:** render approved public content through WordPress while the old site still runs. Save the example as `wp-export.php` beside the helper and run it with `wp --path=/path/to/site eval-file /private/work/wp-export.php`. Supply `MIGRATION_PUBLIC_POST_IDS` as an explicit comma-separated list of approved page/post IDs; optional `MIGRATION_USER_IDS` selects identity records separately. Set the private-output variables above. Approval must include reviewing password, membership and plugin access rules: the script rejects password-protected and unpublished posts, but cannot infer every plugin's privacy policy.
+- **Rendered HTML:** render approved public content through WordPress while the old site runs: save the example as `wp-export.php` beside the helper and run `wp --path=/path/to/site eval-file /private/work/wp-export.php`. List approved page and post IDs in `MIGRATION_PUBLIC_POST_IDS`; optional `MIGRATION_USER_IDS` selects identity records. Set the private-output variables above. Review password, membership and plugin access rules when approving: the script rejects password-protected and unpublished posts but cannot infer every plugin's privacy rules.
 
   ```php
   <?php
@@ -122,11 +122,29 @@ The supplied notes report checks on WordPress 7.1. The scoped exporter below has
           'publishedAt' => strtotime(($p->post_date_gmt ?? $p->post_modified_gmt) . ' UTC'),
           'fields' => function_exists('get_fields') ? get_fields($id) : null,
           'seoRawTitle' => get_post_meta($id, '_yoast_wpseo_title', true),
-          'seoRawDescription' => get_post_meta($id, '_yoast_wpseo_metadesc', true)];
+          'seoRawDescription' => get_post_meta($id, '_yoast_wpseo_metadesc', true),
+          'parentLegacyId' => (int) $p->post_parent ?: null, 'menuOrder' => (int) $p->menu_order,
+          'image' => ($img = get_the_post_thumbnail_url($id, 'large')) ? migration_route($img) : null,
+          'categories' => array_map(fn($t) => ['name' => html_entity_decode($t->name, ENT_QUOTES | ENT_HTML5, 'UTF-8'), 'slug' => $t->slug], get_the_category($id)),
+          'tags' => array_map(fn($t) => html_entity_decode($t->name, ENT_QUOTES | ENT_HTML5, 'UTF-8'), wp_get_post_tags($id))];
       } finally { wp_reset_postdata(); $GLOBALS['post'] = $previous; }
     }
   };
   migration_jsonl($dir . '/content.jsonl', $content());
+  $menus = function () { // titles arrive HTML-encoded (&#038;)
+    $host = parse_url(home_url('/'), PHP_URL_HOST);
+    foreach (wp_get_nav_menus() as $menu) {
+      foreach (wp_get_nav_menu_items($menu->term_id) ?: [] as $i) {
+        $h = parse_url($i->url, PHP_URL_HOST);
+        yield ['menu' => $menu->slug, 'itemId' => (int) $i->ID, 'parentItemId' => (int) $i->menu_item_parent ?: null,
+          'order' => (int) $i->menu_order, 'title' => html_entity_decode($i->title, ENT_QUOTES | ENT_HTML5, 'UTF-8'),
+          'route' => $h === null ? $i->url : ($h === $host ? migration_route($i->url) : null),
+          'externalUrl' => $h !== null && $h !== $host ? $i->url : null,
+          'targetLegacyId' => $i->type === 'post_type' ? (int) $i->object_id : null];
+      }
+    }
+  };
+  migration_jsonl($dir . '/menus.jsonl', $menus());
   $users = function () use ($userIds) {
     foreach ($userIds as $id) {
       $u = get_userdata($id);
@@ -138,20 +156,33 @@ The supplied notes report checks on WordPress 7.1. The scoped exporter below has
   migration_jsonl($dir . '/users.jsonl', $users()); // No passwords, tokens or inferred authorization.
   ```
 
-  This captures selected `page`/`post` snapshots, optional approved users, Polylang language/translation IDs, raw Yoast overrides and ACF values. Add a reviewed adapter for WPML or another language provider; do not infer language from the slug. Identify records by site plus post ID, and preserve the full source URL/route, including query strings and trailing-slash behavior. Split/map `content.jsonl` into the chosen import DTOs; extra fields are **discarded** by the existing converter unless explicitly mapped, and arrays/ACF structures require an adapted schema/importer and frontend use. Raw Yoast templates are not final rendered SEO tags.
+  This captures approved `page`/`post` snapshots (parent, menu order, featured image, categories, tags), every menu in `menus.jsonl` (rebuild navigation from it, not the page list), optional approved users, Polylang language and translation IDs, raw Yoast overrides and ACF values. Add a reviewed adapter for WPML or another provider; never infer language from the slug. Key records by site plus post ID and keep the full source URL, including query strings and trailing slashes. The converter **discards** unmapped fields: map them, and adapt schema, importer and frontend for arrays and ACF structures. Raw Yoast templates are not rendered SEO tags.
 
-  Post context is established, but CLI rendering does not recreate every URL, session, language, membership or request context or collect all enqueued styles/scripts. Compare anonymous and authenticated browser journeys. Searches for literal shortcodes or `<form|wpcf7|woocommerce|admin-ajax|wp-json` are only heuristics: hits require investigation, and no hits do not establish independence from PHP. Rebuild or retain live behavior separately; never publish private or personalized snapshots as public assets.
-- **Metadata and options:** `wp_postmeta` and `wp_options` often hold serialized PHP (`a:2:{s:3:"foo";...}`). WordPress metadata APIs decode serialized values; this is not a guarantee that arbitrary metadata or plugin code is safe. Inspect and process an owner-approved copy in an isolated environment. Do not pass untrusted serialized input to PHP's `unserialize()`. Preserve exact bytes and validate decoded types before converting to JSON.
+  CLI rendering does not recreate every URL, session, language or request context, nor collect enqueued styles and scripts: compare anonymous and signed-in browser journeys. Searching for shortcodes or `<form|wpcf7|woocommerce|admin-ajax|wp-json` is only a heuristic; no hits do not prove independence from PHP. Never publish private or personalized snapshots as public assets.
+- **Metadata and options:** `wp_postmeta` and `wp_options` often hold serialized PHP (`a:2:{s:3:"foo";...}`). Process an owner-approved copy in an isolated environment, never pass untrusted serialized input to `unserialize()`, preserve exact bytes and validate decoded types before converting to JSON.
 - **Taxonomies:** `wp_terms`, `wp_term_taxonomy`, `wp_term_relationships`.
-- **Users:** `wp_users` (`user_email`, `display_name`; never `user_pass`) and all roles/capabilities in `wp_usermeta`. The example preserves every assigned role as source data, not target authorization. Review custom roles, direct capabilities, multisite membership and super-admin status separately, then define explicit target permissions and verified account linking.
+- **Form submissions (Flamingo):** each is a `flamingo_inbound` post, fields in postmeta `_field_<name>`. Export them so open requests survive, and import them into the inbox (`backend-example.md`). Select and checkbox values are **arrays**: a string cast writes `Array`, so join them. Run with `wp eval-file`; converter fields `id:nat kind:variant name:text email:text subject:text location:opt:text message:text createdAt:time handled:bool legacyId:opt:nat`; adapt field names to the site's forms:
+
+  ```php
+  <?php
+  $out = fopen(__DIR__ . '/export/submissions.jsonl', 'w');
+  foreach (get_posts(['post_type' => 'flamingo_inbound', 'post_status' => 'any', 'numberposts' => -1]) as $p) {
+    $f = function ($k) use ($p) { $v = get_post_meta($p->ID, '_field_' . $k, true); return is_array($v) ? implode(', ', $v) : (string) $v; };
+    $report = $f('issue-type') !== '';
+    fwrite($out, json_encode(['id' => $p->ID, 'kind' => $report ? 'report' : 'contact', 'name' => $f('your-name'), 'email' => strtolower(trim($f('your-email'))),
+      'subject' => $report ? $f('issue-type') : $f('your-subject'), 'location' => $report ? $f('location') : null, 'message' => $f('your-message'),
+      'createdAt' => strtotime($p->post_date_gmt . ' UTC'), 'handled' => false, 'legacyId' => $p->ID], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n");
+  }
+  ```
+- **Users:** `wp_users` (`user_email`, `display_name`; never `user_pass`) and all roles/capabilities in `wp_usermeta`. Roles are exported as source data, not target permissions. Review custom roles, direct capabilities, multisite membership and super-admin status, then define target permissions and verified account linking.
 - **URLs:** inspect `permalink_structure` and export `get_permalink()` for each selected record. Preserve parent/date/category/language paths and the actual slash behavior. For a slash-ending route, `dist/afval/index.html` serves `/afval/`; for a slashless route, `dist/afval.html` serves `/afval`. Query-string links such as `/?p=123` can circulate even with pretty permalinks; map them explicitly (`old-urls.md`).
 - **Files:** `wp-content/uploads/YYYY/MM/`, including generated thumbnail sizes. Copy the ones still referenced into the static-site `dir` at the same paths so old image URLs keep working.
 - **Schedules:** WP-Cron (`wp cron event list`), triggered by page visits rather than the system cron.
-- **Plugins:** run `wp plugin list --status=active --skip-update-check --format=json`, then repeat for `active-network`, `must-use` and `dropin`; repeat per in-scope multisite site with `--url=<site-url>`. Inspect custom theme functions too. Decide per capability whether to rebuild, replace, retain as an integration or retire with the owner's consent. Record remaining PHP dependencies and owner-agreed live workflow tests. These platform-specific starting points require verification against installed versions and configuration:
+- **Plugins:** run `wp plugin list --status=active --skip-update-check --format=json`, then for `active-network`, `must-use` and `dropin`, and per in-scope multisite site with `--url=<site-url>`. Inspect custom theme functions too. Per capability, rebuild, replace, keep as an integration or retire with the owner's consent; record remaining PHP dependencies and agreed live workflow tests. Verify these starting points against the installed versions and configuration:
   - *Contact Form 7:* forms are posts of type `wpcf7_contact_form` (fields in postmeta `_form`, recipients in `_mail`); the rendered `<form>` posts to `wp-json/contact-form-7`. Becomes a backend update method plus a page form; decide who receives the mail (`https-outcalls`).
   - *Yoast SEO:* raw per-page overrides in `_yoast_wpseo_title` and `_yoast_wpseo_metadesc` are exported above; canonical and social data may also use `wp_yoast_indexable`. Resolve templates/defaults and map required output into `<title>`, canonical, social and metadata tags; compare the original page head.
   - *Advanced Custom Fields:* values in postmeta under the field name (repeaters as `name_0_sub`, `name_1_sub`, ...) with a `_name` key reference beside each; `get_fields()` returns them structured (exported above) when the field groups are in the database or theme code. Each field becomes a record field.
-  - *Elementor and other page builders:* builder structure may live in metadata such as `_elementor_data`; `post_content` alone need not reproduce the page. With the source post established as current, the example calls Elementor's direct `get_builder_content` API; its `get_builder_content_for_display` template wrapper deliberately returns empty for the current post. An empty builder snapshot stops the export for review. Compare full pages, assets, templates, conditions and live controls in the actual request context; preserve required styles or restyle deliberately.
+  - *Elementor and other page builders:* builder structure may live in metadata such as `_elementor_data`, so `post_content` alone need not reproduce the page. The example calls Elementor's direct `get_builder_content` API: its `get_builder_content_for_display` wrapper returns empty for the current post. An empty builder snapshot stops the export for review. Compare full pages, assets, templates, conditions and live controls in the real request context; keep required styles or restyle deliberately.
   - *WooCommerce:* products are posts of type `product` with postmeta `_price`, `_sku`, `_stock_status` and the `wc_product_meta_lookup` table; orders in the `wc_orders*` tables (or posts of type `shop_order` on older sites); customers are users. The shop, cart, checkout and account pages export empty or as JavaScript-dependent markup. Catalog and content can move; checkout, payments, tax and stock are the owner decision under Magento's heading below.
   - *Polylang and WPML:* one post per language, linked by the `post_translations` taxonomy (Polylang) or the `icl_translations` table (WPML). Export the language and the links (the script does this for Polylang) and build one page per language at its own path.
   - *Wordfence, Akismet, caching and backup plugins:* identify the protections and operating duties they supply. Spam prevention, authorization, abuse handling, recovery and freshness may still be required. Replace, retain or retire each capability explicitly; removing PHP does not remove those responsibilities.
@@ -160,7 +191,7 @@ The supplied notes report checks on WordPress 7.1. The scoped exporter below has
 
 - **Layout:** Composer sites keep the web root in `web/` (or `docroot/`); the project root holds `composer.json`, `vendor/` and `config/`. The inventory script reports the web root. Run `drush` from the project root.
 - **Content:** `node_field_data` (`nid`, `type`, `langcode`, `title`, `status`, `created`, `changed` as Unix seconds); bodies in `node__body` (`entity_id`, `body_value`, `body_summary`, `body_format`); other fields in `node__field_<name>` tables. Multilingual sites have one row per `langcode`.
-- **Text formats:** `body_format` (`basic_html`, `full_html`, ...) determines output filters. `$node->body->processed` applies those filters, but does not recreate a full page, Views, layout, access or editorial behavior. The supplied notes report Drupal 11.4 checks; the revised example below has only a PHP syntax check. Save it as `drupal-export.php` beside the [shared helper](#scoped-export-helpers), outside the web root. Run from the project with `drush php:script /private/work/drupal-export.php`. Set the private-output variables above and `MIGRATION_PUBLIC_NODE_TRANSLATIONS` to approved `node-id:langcode` pairs such as `16:en,16:fr`. Optional `MIGRATION_USER_IDS` selects identity records separately. Approval must consider module access rules and each translation; an export is not a new access policy.
+- **Text formats:** `body_format` (`basic_html`, `full_html`, ...) determines output filters. `$node->body->processed` applies them but not a full page, Views, layout, access or editorial behavior. Tested end to end by `tests/test-drupal.sh`. Save it as `drupal-export.php` beside the [shared helper](#scoped-export-helpers), outside the web root, and run `drush php:script /private/work/drupal-export.php` from the project. Set the private-output variables and `MIGRATION_PUBLIC_NODE_TRANSLATIONS` to approved `node-id:langcode` pairs such as `16:en,16:fr`; optional `MIGRATION_USER_IDS` selects identity records. Approval covers module access rules and each translation; an export is not an access policy.
 
   ```php
   <?php
@@ -213,9 +244,9 @@ The supplied notes report checks on WordPress 7.1. The scoped exporter below has
   migration_jsonl($dir . '/users.jsonl', $users()); // Preserve source roles as data, not target authorization.
   ```
 
-  Identify translated records by node ID/UUID **and language**, so imports do not overwrite translations sharing the same node ID. Preserve both aliases and language-aware canonical URLs; domain/prefix negotiation can make them differ. Adapt the converter, import schema and frontend to these rows, including custom fields where required. Anonymous rendering and entity access checks do not establish every module's output policy; test relevant contexts and exclude personalized output from public snapshots.
+  Key translated records by node ID/UUID **and language**, or imports overwrite translations sharing a node ID. Preserve both aliases and language-aware canonical URLs; domain/prefix negotiation can make them differ. Adapt the converter, import schema and frontend to these rows, including custom fields where required. Anonymous rendering and entity access checks do not establish every module's output policy; test relevant contexts and exclude personalized output from public snapshots.
 
-- **Modules and custom code:** inventory enabled modules with `drush pm:list --type=module --status=enabled --format=json`; inspect contributed/custom modules, themes, controllers, services, hooks and event subscribers. Record each capability and its dependencies, then choose a rebuild, replacement, retained integration or approved retirement.
+- **Modules and custom code:** list enabled modules with `drush pm:list --type=module --status=enabled --format=json`; inspect contributed and custom modules, themes, controllers, services, hooks and event subscribers. Per capability and its dependencies, choose a rebuild, replacement, retained integration or approved retirement.
 - **Dynamic workflows:** inventory Views displays, filters and contextual arguments; form validation/submission, calculated fields, roles/permissions/access checks, revisions, moderation, translations and editorial publishing. Define owner-agreed live tests for allowed and denied actions and relevant user/route/language/filter contexts. Filtered body HTML alone does not preserve these behaviors.
 - **Raw SQL exports:** confirm the MySQL/MariaDB client's connection encoding before export; a wrong setting can corrupt Unicode. Where supported, pass explicit flags such as `drush sql:query --extra="--default-character-set=utf8mb4 --batch --raw" "SELECT ..."` and reconcile representative Unicode values. Consult the installed Drush version rather than assuming its defaults.
 - **URLs:** `path_alias` includes the internal path, alias and language. Preserve the observed route and actual slash behavior; generate reviewed language-aware redirects for circulating `/node/<nid>` links. Do not collapse different language aliases to one path.
@@ -229,7 +260,7 @@ Table and column names below were checked on Joomla 6.2.
 
 - **Prefix:** `$dbprefix` in `configuration.php` (often random, such as `abc12_`); the queries below write it as `#__`. Always pass `--default-character-set=utf8mb4` to the `mysql` client: a table filled through a client with the wrong character set holds double-encoded text (`RÃ©sidents` for `Résidents`), which the repair expression in `data-import.md` restores (tested on such a row).
 - **Content:** `#__content` (`id`, `title`, `alias`, `introtext`, `fulltext`, `state` where 1 is published, `catid`, `publish_up`, `modified`); categories in `#__categories` (`alias`, `path`).
-- **URLs:** `$sef` and `$sef_rewrite` in `configuration.php`. Search-engine-friendly URLs come from `#__menu` (`path`, and `link` such as `index.php?option=com_content&view=article&id=5`) combined with article aliases. With `$sef_rewrite` off (the default), every public URL starts with `/index.php/`: keep those paths working with exact `_redirects` rules from `/index.php/<path>` to the new path. Non-SEF URLs are query strings on `/index.php` (mapping page). `#__redirect_links` (`old_url`, `new_url`, `header` with the status code) holds the site's existing redirects; carry them over as rules.
+- **URLs:** `$sef` and `$sef_rewrite` in `configuration.php`. SEF URLs come from `#__menu` (`path`, and `link` such as `index.php?option=com_content&view=article&id=5`) plus article aliases. With `$sef_rewrite` off (the default) every public URL starts with `/index.php/`: add exact `_redirects` rules from `/index.php/<path>` to the new path. Non-SEF URLs are query strings on `/index.php` (mapping page). Carry `#__redirect_links` (`old_url`, `new_url`, `header` status code) over as rules.
 - **Users:** `#__users` (`name`, `username`, `email`; never `password`).
 - **Files:** `images/` by default.
 

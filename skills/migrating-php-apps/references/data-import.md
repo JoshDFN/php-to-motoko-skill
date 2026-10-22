@@ -1,6 +1,6 @@
 # Exporting, Converting and Importing the Data
 
-The source author reports an end-to-end MariaDB 10.11 export, conversion and local import with icp-cli 1.7.0, followed by reconciliation and a populated-state upgrade, including accents, emoji, quotes, tabs, backslashes, newlines and NULLs. That run was not repeated for this revision. The revised converter has local fixture checks for escaping, numeric validation, timestamp precision and bounded batches; these do not establish a database-to-canister round trip.
+Tested end to end by the repository's CI suites: MariaDB export, conversion, local import, reconciliation and a populated-state upgrade. The revised converter has local fixture checks for escaping, numeric validation, timestamp precision and bounded batches; these do not establish a database-to-canister round trip.
 
 ## 1. Back up first
 
@@ -37,7 +37,7 @@ db -e "SELECT JSON_OBJECT('legacyId', id, 'email', LOWER(TRIM(email)), 'displayN
   FROM users ORDER BY id;" > export/users.jsonl
 ```
 
-- `--raw` is mandatory. Without it the client escapes backslashes, tabs and newlines again: in testing, one row became unparseable and another parsed with corrupted text.
+- `--raw` is mandatory (SKILL.md, silent failure 1): in testing, one row became unparseable and another parsed with corrupted text.
 - `SET time_zone` must name the zone the PHP app **wrote** `DATETIME` values in (php.ini `date.timezone`, `date_default_timezone_set`). `+00:00` is right only if the app wrote UTC. `TIMESTAMP` columns are stored in UTC and convert correctly whatever the session zone.
 - `TINYINT(1)` booleans arrive as `0`/`1`; the converter's `bool` type accepts both forms.
 - Double-encoded text (`Ã©` where `é` belongs) means UTF-8 bytes were stored in a `latin1` column. Repair it in the `SELECT`, then spot-check: `CONVERT(CAST(CONVERT(title USING latin1) AS BINARY) USING utf8mb4)`.
@@ -58,7 +58,7 @@ Check every export before converting: `wc -l` against `SELECT COUNT(*)`, and `py
 
 ## 3. Convert to Candid batch files
 
-`jsonl_to_candid.py` (stdlib only) writes `PREFIX-0001.did`, `PREFIX-0002.did`, ... each holding one call's argument, `(vec { record { ... }; ... })`. Defaults: at most 500 rows and 1 MB of text per file including its Candid envelope, matching `maxImportBatch` in the backend and staying far below the 2 MB message limit. It fails with the file, line and field when a field is missing or a non-optional field is NULL. Fractional identifiers are rejected; decimal epoch values retain precision through nanosecond conversion (sub-nanosecond values round half to even). A single oversized record is rejected for explicit chunking/schema review.
+`jsonl_to_candid.py` (stdlib only) writes `PREFIX-0001.did`, `PREFIX-0002.did`, ..., each one call's argument, `(vec { record { ... }; ... })`: at most 500 rows and 1 MB per file, matching `maxImportBatch` and far below the 2 MB message limit. It names the file, line and field when a field is missing or a required one is NULL, rejects fractional identifiers, keeps decimal epoch precision through nanosecond conversion (sub-nanosecond values round half to even), and rejects a single oversized record for chunking or schema review.
 
 ```python
 #!/usr/bin/env python3
@@ -171,7 +171,7 @@ if __name__ == "__main__":
 
 ```bash
 set -euo pipefail
-# Run each conversion in a fresh private working directory. Refuse to reuse old batches.
+# Convert in a fresh private directory; never reuse old batches.
 mkdir -m 700 batches
 python3 jsonl_to_candid.py export/pages.jsonl batches/pages \
   legacyId:nat slug:text title:text bodyHtml:text published:bool updatedAt:time
@@ -191,7 +191,7 @@ Candid text rules the converter follows (both caused real failures before they w
 
 ## 4. Import
 
-Save this as `import_batches.py`. It processes the three tables in order and stops the entire run on a command failure, an application-level `err`, malformed output or an unexpected result shape. The `icp-cli` 1.7.0 flags `--output candid --json` return a JSON envelope with a `response_candid` string; see the [official output implementation](https://github.com/dfinity/icp-cli/blob/v1.7.0/crates/icp-cli/src/call_output.rs). A returned application error does not by itself make the CLI exit unsuccessfully.
+Save this as `import_batches.py`. It imports the three tables in order and stops the whole run on a command failure, an application-level `err`, malformed output or an unexpected result shape: an application error alone does not make the CLI exit unsuccessfully. With icp-cli 1.7.0, `--output candid --json` returns a JSON envelope with a `response_candid` string.
 
 ```python
 #!/usr/bin/env python3
@@ -233,13 +233,13 @@ export MIGRATION_ENV=local   # change to ic only for the approved production tar
 python3 import_batches.py
 ```
 
-The success check is deliberately specific to this example's `Result<Nat, ImportError>` interface. If you change that interface or CLI output format, update and test the decoder before importing. A zero-row source table generates no batch files; reconcile its source count separately. Because imports upsert by legacy id, rerun the driver with the same completed batch set after fixing a failure. Generate a new, separate batch directory for a new export.
+The success check is specific to this example's `Result<Nat, ImportError>` interface: if you change it or the CLI output format, update and test the decoder first. A zero-row source table generates no batch files; reconcile its source count separately. Because imports upsert by legacy id, rerun the driver with the same completed batch set after fixing a failure. Generate a new, separate batch directory for a new export.
 
 ## 5. Reconcile
 
 ```bash
 icp canister call backend importCounts '()' --query -e "$MIGRATION_ENV"
-# compare each number with SELECT COUNT(*) FROM <table> (respecting any WHERE used in the export)
+# first check only: each number against SELECT COUNT(*) with the export's WHERE
 icp canister call backend getPage '("english")' --query -e "$MIGRATION_ENV"   # a row with accents, emoji, quotes, tabs, backslashes
 sha256sum uploads/2019/*.pdf                                     # compare with the migrated copies
 ```

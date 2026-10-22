@@ -34,8 +34,8 @@ The script is a separate file so it works under a `script-src 'self'` Content-Se
 ```
 
 ```javascript
-// Old PHP URLs carried their meaning in the query string, which _redirects cannot match.
-// Map them in the browser. Generated from the export; keep it in sync with the data.
+// _redirects cannot match query strings, so old PHP URLs are mapped here.
+// Generated from the export; keep it in sync with the data.
 (function () {
   var q = new URLSearchParams(location.search);
   var routes = {
