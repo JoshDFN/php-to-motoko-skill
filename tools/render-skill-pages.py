@@ -60,7 +60,7 @@ DOC_CSS = """
 .doc-top { background: var(--doc-ink); color: #fff; }
 .doc-site-nav { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px 28px; padding-block: 20px; border-bottom: 1px solid #40464f; }
 .doc-brand { display: inline-flex; gap: 10px; align-items: center; min-height: 44px; font: 600 22px/1.2 var(--display); letter-spacing: -.04em; color: #fff; }
-.doc-brand img { display: block; width: 34px; height: 34px; }
+.doc-brand img { display: block; width: 34px; height: 34px; object-fit: contain; }
 .doc-site-links { display: flex; gap: 8px 28px; flex-wrap: wrap; }
 .doc-site-links a { display: inline-flex; align-items: center; min-height: 44px; font-size: 14px; color: #e0e4ea; }
 .doc-site-links a:hover, .doc-actions a:hover { text-decoration: underline; text-underline-offset: 5px; }
@@ -157,7 +157,7 @@ def move_page(title, html_body, toc, raw_rel, current):
     page_url = "https://www.movetomotoko.com/skills/migrating-php-apps/" + ("" if raw_rel == "SKILL.md" else raw_rel[:-3] + ".html")
     page_title = html.escape(title + " · Move to Motoko", quote=True)
     description = html.escape(DOC_DESCRIPTIONS[raw_rel], quote=True)
-    social_image = "https://www.movetomotoko.com/assets/move-to-motoko-social-v2.jpg"
+    social_image = "https://www.movetomotoko.com/assets/move-to-motoko-social-v3.jpg"
     nav = "".join(f'<a href="{root}/skills/migrating-php-apps/{"" if f == "SKILL.md" else "references/" + f[:-3] + ".html"}"{" aria-current=\"page\"" if f == current else ""}>{html.escape(t)}</a>'
                   for f, t in [("SKILL.md", "The workflow")] + REFS)
     return f"""<!doctype html>
