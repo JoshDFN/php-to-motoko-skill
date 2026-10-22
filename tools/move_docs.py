@@ -33,12 +33,12 @@ def move_page(title, html_body, toc, heading_id, raw_rel, nav, root, page_url, s
 <body class="skill-docs"><a class="skip-link" href="#main">Skip to content</a>
 <header class="doc-top"><div class="wrap doc-site-nav">
 <a class="doc-brand" href="{root}/"><img src="{root}/assets/move-to-motoko-mark.svg" width="34" height="34" alt=""><span>Move to Motoko</span></a>
-<nav class="doc-site-links" aria-label="Site"><a href="{root}/why-move/">Why Motoko</a><a href="{root}/migration/">The migration</a><a href="{root}/start/">Get the skill ↗</a></nav></div>
+<nav class="doc-site-links" aria-label="Site"><a href="{root}/why-motoko">Why Motoko</a><a href="{root}/migration">The migration</a><a href="{root}/start">Get the skill ↗</a></nav></div>
 <div class="wrap doc-head"><p class="doc-kicker">migrating-php-apps · {html.escape(raw_rel)}</p>
 <h1 id="{heading_id}">{html.escape(title)}</h1><p class="doc-deck">An agent skill for moving a PHP website or application to the Internet Computer with a Motoko backend. This is the readable version; agents load the Markdown file.</p>
 <div class="doc-actions"><a href="{root}/skills/migrating-php-apps/{raw_rel}">Raw Markdown for agents ↗</a><a href="{root}/skills/migrating-php-apps.zip" download>Download skill ZIP ↓</a></div>
 <div class="doc-companion"><span>Install the PHP migration skill</span><code>npx skills add JoshDFN/php-to-motoko-skill</code></div>
 <nav class="doc-nav" aria-label="Skill documents">{nav}</nav></div></header>
 <main class="wrap doc" id="main" tabindex="-1"><article class="doc-body">{html_body}</article><aside class="doc-toc" aria-label="On this page"><details class="doc-outline" open><summary><span>On this page</span><span class="doc-outline-icon" aria-hidden="true"></span></summary><div class="doc-outline-label" aria-hidden="true">On this page</div><nav aria-label="Document sections">{toc}</nav></details></aside></main>
-<footer class="doc-footer"><div class="wrap"><p>Licensed <a href="{root}/skills/migrating-php-apps/LICENSE.txt">Apache-2.0</a>. <a href="{source_url}">View the skill source on GitHub</a>. Agents use the accompanying Markdown files.</p><a href="{root}/start/">Return to your migration brief ↗</a></div></footer>
+<footer class="doc-footer"><div class="wrap"><p>Licensed <a href="{root}/skills/migrating-php-apps/LICENSE.txt">Apache-2.0</a>. <a href="{source_url}">View the skill source on GitHub</a>. Agents use the accompanying Markdown files.</p><a href="{root}/start">Return to your migration brief ↗</a></div></footer>
 </body></html>"""
