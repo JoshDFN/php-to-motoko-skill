@@ -21,7 +21,8 @@ assert_eq "#__redirect_links old_url, new_url, header" "$(cols joomla j5_redirec
 assert_eq "#__users name, username, email, password" "$(cols joomla j5_users "'name','username','email','password'")" "4"
 [ -d images ] && ok "images/ exists" || fail "images/ missing"
 assert_contains "configuration.php has \$sef and \$sef_rewrite" "$(grep -c -E '\$(sef|sef_rewrite) ' configuration.php)" "2"
-mysql -u joomla -pjoomla-pass joomla -e "INSERT INTO j5_content (asset_id,title,alias,introtext,\`fulltext\`,state,catid,created,created_by,modified,modified_by,publish_up,images,urls,attribs,version,ordering,metakey,metadesc,access,hits,metadata,featured,language,note) VALUES (0,'Résidents – Ünïcode ✓','enc',' ','',1,2,NOW(),42,NOW(),42,NOW(),'{}','{}','{}',1,1,'','',1,0,'{}',0,'*','')" 2>/dev/null   # deliberately with the client's default (wrong) character set
+mysql -u joomla -pjoomla-pass --default-character-set=latin1 joomla -e "INSERT INTO j5_content (asset_id,title,alias,introtext,\`fulltext\`,state,catid,created,created_by,modified,modified_by,publish_up,images,urls,attribs,version,ordering,metakey,metadesc,access,hits,metadata,featured,language,note) VALUES (0,'Résidents – Ünïcode ✓','enc',' ','',1,2,NOW(),42,NOW(),42,NOW(),'{}','{}','{}',1,1,'','',1,0,'{}',0,'*','')" 2>/dev/null   # deliberately misinterpret the UTF-8 fixture bytes as latin1, independently of client defaults
+assert_contains "fixture really contains double-encoded text before repair" "$(rosql joomla "SELECT title FROM j5_content WHERE alias='enc'")" "RÃ©sidents"
 assert_contains "the documented repair restores double-encoded text" "$(rosql joomla "SELECT CONVERT(CAST(CONVERT(title USING latin1) AS BINARY) USING utf8mb4) FROM j5_content WHERE alias='enc'")" "Résidents – Ünïcode ✓"
 
 section "Laravel, Symfony, CodeIgniter (composer create-project)"

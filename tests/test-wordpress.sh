@@ -7,6 +7,19 @@ command -v wp >/dev/null 2>&1 || { mkdir -p "$WORK/bin"; curl -sL https://raw.gi
 PLUGINS="${PLUGINS:-contact-form-7 wordpress-seo woocommerce advanced-custom-fields elementor polylang}"
 WPDIR="$WORK/wordpress"; W="wp --allow-root --path=$WPDIR"
 
+# Plugins can print PHP notices to stdout even with --porcelain. Accept exactly one
+# numeric result, keep the notices visible, and preserve a failed command's status.
+wp_id() {
+  local output id
+  output=$($W "$@") || return "$?"
+  id=$(printf '%s\n' "$output" | awk '/^[0-9]+$/ { id=$0; n++ } END { if (n == 1) print id; else exit 1 }') || {
+    printf 'Expected one WordPress ID, got:\n%s\n' "$output" >&2
+    return 1
+  }
+  [ "$output" = "$id" ] || printf 'WordPress output accompanying ID %s:\n%s\n' "$id" "$output" >&2
+  printf '%s\n' "$id"
+}
+
 section "install WordPress and seed it"
 db_start && db_create wp && ok "database ready" || fail "database"
 rm -rf "$WPDIR" && mkdir -p "$WORK" && (cd "$WORK" && curl -sL https://wordpress.org/latest.tar.gz | tar xz)
@@ -16,11 +29,11 @@ $W rewrite structure '/%postname%/' >/dev/null; ok "WordPress $($W core version)
 if [ -n "$PLUGINS" ]; then $W plugin install $PLUGINS --activate > "$WORK/plugins.log" 2>&1 && ok "plugins active: $PLUGINS" || fail "plugin install (see $WORK/plugins.log)"; fi
 $W user create redacteur editor@example.org --role=editor --display_name="Fatima El Amrani" --user_pass=x1 >/dev/null
 $W term create category Nieuws --slug=nieuws >/dev/null
-P1=$($W post create --post_type=page --post_status=publish --post_title="Afval en recycling" --post_name=afval --post_content="<h2>Ophaaldagen</h2><p>Restafval elke dinsdag.</p>" --porcelain)
+P1=$(wp_id post create --post_type=page --post_status=publish --post_title="Afval en recycling" --post_name=afval --post_content="<h2>Ophaaldagen</h2><p>Restafval elke dinsdag.</p>" --porcelain)
 # shellcheck disable=SC1111
 $W post create --post_type=page --post_status=publish --post_title="Résidents & visitors – Ünïcode ✓ 🚲" --post_name=english --post_content="<p>It's easy: “quotes”, tabs	and backslashes \\ here.</p>" --porcelain >/dev/null
 $W post create --post_type=page --post_status=draft --post_title="Concept beleid" --post_name=concept-beleid --post_content="<p>Nog niet openbaar.</p>" --porcelain >/dev/null
-N1=$($W post create --post_status=publish --post_title="Wegwerkzaamheden Stationsweg" --post_name=wegwerkzaamheden-stationsweg --post_excerpt="Afgesloten tot 30 oktober." --post_content="<p>Omleiding via de Parklaan.</p>" --post_category=nieuws --post_author=2 --porcelain)
+N1=$(wp_id post create --post_status=publish --post_title="Wegwerkzaamheden Stationsweg" --post_name=wegwerkzaamheden-stationsweg --post_excerpt="Afgesloten tot 30 oktober." --post_content="<p>Omleiding via de Parklaan.</p>" --post_category=nieuws --post_author=2 --porcelain)
 python3 - "$WORK/kaart.png" <<'PY'
 import struct, zlib, sys   # a valid 400x300 PNG with only the standard library
 w, h = 400, 300; raw = b"".join(b"\x00" + bytes([255, 225, 90]) * w for _ in range(h))
@@ -30,7 +43,7 @@ PY
 $W media import "$WORK/kaart.png" --title="Kaart" --post_id="$P1" --porcelain >/dev/null
 if $W plugin is-active contact-form-7 2>/dev/null; then F=$($W post list --post_type=wpcf7_contact_form --field=ID | head -1); $W post create --post_type=page --post_status=publish --post_title="Contact" --post_name=contact --post_content="[contact-form-7 id=\"$F\"]" --porcelain >/dev/null; fi
 if $W plugin is-active elementor 2>/dev/null; then
-  P3=$($W post create --post_type=page --post_status=publish --post_title="Over ons" --post_name=over-ons --post_content="" --porcelain)
+  P3=$(wp_id post create --post_type=page --post_status=publish --post_title="Over ons" --post_name=over-ons --post_content="" --porcelain)
   $W post meta update "$P3" _elementor_edit_mode builder >/dev/null; $W post meta update "$P3" _elementor_template_type wp-page >/dev/null
   $W post meta update "$P3" _elementor_data '[{"id":"a1b2c3","elType":"container","settings":[],"elements":[{"id":"d4e5f6","elType":"widget","widgetType":"heading","settings":{"title":"Welkom bij de gemeente","header_size":"h2"},"elements":[]}],"isInner":false}]' >/dev/null
 fi
