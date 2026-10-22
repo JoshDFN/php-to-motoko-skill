@@ -1,8 +1,8 @@
 # Tests
 
-Each script re-runs one part of what the skill promises, taking the scripts and code **from the skill's own documentation**, so the docs are what gets tested. They print `ok` / `FAIL` per check and exit non-zero on any failure.
+The scripts check components using code **from the skill's own documentation**. They exercise fixture snapshots, imports and selected runtime behavior; they do not establish that an application's forms, checkout, access rules or integrations have been rebuilt. They print `ok` / `FAIL` per check and exit non-zero on any failure.
 
-| Script | What it proves | Needs |
+| Script | What it checks | Needs |
 |---|---|---|
 | `test-lint.sh` | every shell and PHP block is valid; `skill-validator` (the icskills CI tool) passes; the icskills project checks pass | shellcheck, php, node 22, npm 11, git |
 | `test-backend.sh` | the documented Motoko backend type-checks, deploys, imports the plain-PHP fixture, reconciles, is idempotent, refuses non-controllers, keeps data across upgrades, runs timers, and takes a post-go-live migration | icp-cli, mops |

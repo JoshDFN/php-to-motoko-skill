@@ -2,8 +2,8 @@
 name: migrating-php-apps
 description: "Move an existing PHP website or web app to the Internet Computer with a Motoko backend: WordPress and Drupal sites, Joomla and Magento stores, Laravel, Symfony or CodeIgniter apps, and plain PHP on MySQL or PostgreSQL. Covers the read-only inventory and the plan the user approves, rebuilding pages as a static-site frontend or keeping an existing frontend host, porting PHP logic to Motoko, exporting the database and batch-importing it into actor state, keeping old URLs working, moving sign-in to Internet Identity, and cutting over to the existing domain with evidence that it works. Use when the user wants to migrate, port or rebuild a PHP or LAMP site on ICP, move it to Motoko, or get off PHP. Do NOT use for a new Motoko app with no PHP predecessor (use writing-motoko) or for changing a deployed canister's state shape (use migrating-motoko-actors)."
 license: Apache-2.0
-compatibility: "icp-cli >= 1.0.0, mops >= 3.0.0, moc >= 1.12.0, core >= 2.6.0, Node.js >= 22, Python 3; read access to the PHP source, a database export and the upload directories"
 metadata:
+  compatibility: "icp-cli >= 1.0.0, mops >= 3.0.0, moc >= 1.12.0, core >= 2.6.0, Node.js >= 22, Python 3; read access to the PHP source, a database export and the upload directories"
   title: "Migrating PHP Apps to Motoko"
   category: Core
 ---
@@ -12,7 +12,7 @@ metadata:
 
 ## What This Is
 
-A tested workflow for taking a running PHP site or application, with its data, users and URLs, to the Internet Computer. The end state:
+A workflow for taking a running PHP site or application, with its data, users and URLs, to the Internet Computer. Examples and historical test reports cover specific scenarios; validate the actual application's features and integrations. The default architecture:
 
 ```text
 Browser ── HTTPS ──> HTTP gateway ──> frontend canister (@dfinity/static-site, certified-assets)
@@ -23,7 +23,7 @@ Sign-in: Internet Identity    Scheduled jobs: timers    Outbound APIs: HTTPS out
 Domain: custom-domains        No PHP runtime, web server, database server or OS left to patch
 ```
 
-Why this shape: the static-site canister certifies every response ahead of time, so it serves a **finite set of files**. PHP renders per request; on the IC, pages are built ahead of time or rendered in the browser from backend data. Do not serve PHP templates from the Motoko canister's `http_request` as query responses: gateways verify those against certified data, and the certification library is Rust-only. Keep Motoko a typed API. For the few routes that must render per request, and for certification opt-outs, read [`references/delivery.md`](references/delivery.md) before deciding.
+Why this shape: the static-site canister certifies every response ahead of time, so it serves a **finite set of files**. This architecture builds pages ahead of time or renders them in the browser from backend data. ICP also supports request-time HTTP rendering, including in Motoko through query-to-update delivery; certification is not a Rust-only protocol. For custom HTTP routes, choose and test the certification or update path described in [`references/delivery.md`](references/delivery.md), and read its integrity constraints before considering certification opt-outs.
 
 This skill orchestrates the migration. Load these skills for the details it delegates: `writing-motoko` (all Motoko code), `migrating-motoko-actors` (state changes after go-live), `mops-cli`, `icp-cli`, `static-site`, `internet-identity`, `canister-security`, `https-outcalls`, `custom-domains`, `cycles-management`; and when relevant `multi-canister` (data beyond one canister), `vetkeys` / `encrypted-maps` (data that must stay confidential), `deploy-to-cloud-engine` and `cloud-engine-canisters` (organization-owned capacity).
 
@@ -38,11 +38,12 @@ This skill orchestrates the migration. Load these skills for the details it dele
 1. **The old site keeps running, patched, until cutover.** Work from copies. Nothing in the old system changes before the write freeze in Phase 6.
 2. **Track every feature in a feature map** and update it as you go. One row per route, form, job, integration, role and table:
 
-   | Feature | Where in PHP | New home | Status | Evidence |
-   |---------|--------------|----------|--------|----------|
-   | News article page | `news.php`, `.htaccess` rule 1 | static page per item + `getNews` | tested | `/nieuws/12` → 200 locally |
+    | Feature | Where in PHP | New home | Status | Evidence |
+    |---------|--------------|----------|--------|----------|
+    | News article page | `news.php`, `.htaccess` rule 1 | static page per item + `getNews` | tested | `/nieuws/12` → 200 locally |
 
-   Status moves `found → built → tested → data moved → verified live`. A feature without evidence is not done; a feature you cannot rebuild is a **listed gap**, never silently dropped.
+    Status moves `found → built → tested → data moved → verified live`. A feature without evidence is not done; a feature you cannot rebuild is a **listed gap**, never silently dropped.
+
 3. **Get the owner's sign-off on the plan (Phase 2)**, then work through reversible steps without asking again. Ask again before the write freeze, the DNS change and decommissioning; these are the irreversible ones.
 4. **"It builds" is a checkpoint, not the finish.** Done means the agreed features work at the live URL with migrated data, and the hand-over evidence below exists.
 
@@ -60,12 +61,13 @@ Then collect what the script cannot see:
 
 - **Row counts and sizes**, for reconciliation and capacity planning (MySQL/MariaDB):
 
-  ```sql
-  SELECT table_name, table_rows, ROUND((data_length + index_length) / 1048576, 1) AS mb
-  FROM information_schema.tables WHERE table_schema = DATABASE() ORDER BY mb DESC;
-  ```
+    ```sql
+    SELECT table_name, table_rows, ROUND((data_length + index_length) / 1048576, 1) AS mb
+    FROM information_schema.tables WHERE table_schema = DATABASE() ORDER BY mb DESC;
+    ```
 
-  `table_rows` is an estimate for InnoDB; reconcile against `SELECT COUNT(*)`.
+    `table_rows` is an estimate for InnoDB; reconcile against `SELECT COUNT(*)`.
+
 - **The URLs that matter**: `sitemap.xml`, the CMS's URL/alias table (see [`references/frameworks.md`](references/frameworks.md)), and the most-requested paths from the access log: `awk '{print $7}' access.log | sort | uniq -c | sort -rn | head -2000` (common/combined log format).
 - **Logged-in and admin journeys**: a public URL never shows private logic, roles or data. Read the code for them.
 
@@ -77,7 +79,7 @@ For WordPress, Drupal, Joomla, Magento, Laravel and Symfony, read [`references/f
 |-----------------|--------------------------|---------------|
 | Server-rendered pages and templates | Pages built ahead of time into the static-site `dir`, or a browser-rendered app that calls the backend | Content edited daily: render it in the browser from backend data, or rebuild and sync from CI with an `authorize`d syncer principal (`static-site`) |
 | Controllers, includes, plugins | `public` functions on a Motoko actor, `query` for reads | SQL joins and transactions become explicit code; one update call is all-or-nothing unless it `await`s |
-| Tables | One `Map` per table keyed by the legacy primary key, extra `Map`s as indexes | Heap is 4 GiB (wasm32) / 6 GiB (wasm64) per canister; beyond a few GiB of data, split canisters (`multi-canister`) |
+| Tables | For example, `Map`s keyed by legacy identifiers with extra indexes; adapt to the actual schema | Heap is 4 GiB (wasm32) / 6 GiB (wasm64) per canister; beyond a few GiB of data, split canisters (`multi-canister`) |
 | Public media (images, PDFs) | Files in the static-site `dir`, uploaded on deploy | The static-site canister has no runtime upload API |
 | Runtime uploads (`$_FILES`) | Chunks of at most 1 MB per call into the backend, with per-user quotas | 2 MB request/response limit; unbounded storage is a denial-of-service vector (`canister-security`) |
 | `$_SESSION`, login forms, password hashes | Internet Identity and `caller` | Phase 5; never import password hashes |
@@ -93,7 +95,7 @@ For WordPress, Drupal, Joomla, Magento, Laravel and Symfony, read [`references/f
 **Choose the target with the owner:**
 
 - **A. All on ICP (default):** frontend and backend canisters, the existing domain pointed at the frontend.
-- **B. Keep the existing frontend host:** the rebuilt static frontend stays on the owner's host or CDN and calls the Motoko backend on ICP (tested cross-origin). Without the `ic_env` cookie the canister id is page configuration; on mainnet pass no host or root key, locally take both from `icp network status --json`. The external host can change the JavaScript that talks to the backend, so it stays an integrity dependency, and it is the Internet Identity origin (Phase 5).
+- **B. Keep the existing frontend host:** the rebuilt static frontend stays on the owner's host or CDN and calls the Motoko backend on ICP; verify cross-origin calls for the selected deployment. Without the `ic_env` cookie the canister id is page configuration; on mainnet pass no host or root key, locally take both from `icp network status --json`. The external host can change the JavaScript that talks to the backend, so it stays an integrity dependency, and it is the Internet Identity origin (Phase 5).
 
 **Choose where it runs:** `icp deploy -e ic` picks an application subnet. For data-residency rules, create the canisters with `--subnet <subnet-id>` on a subnet whose node locations fit (ICP dashboard); the flag only affects creation. For an organization's own cloud engine, `--engine <engine-name>` with `deploy-to-cloud-engine` and `cloud-engine-canisters` loaded (engines charge no cycles; never attach cycles there).
 
@@ -101,7 +103,7 @@ Present the feature map, the target and the gaps; get sign-off.
 
 ## Phase 3: Build
 
-Scaffold with `icp-cli` and `mops-cli`. Follow the file layout and rules of `writing-motoko` (`types.mo`, `lib/`, `mixins/`, `main.mo`, a `migrations/` chain). A complete, deployed and tested backend for a CMS-style site is in [`references/backend-example.md`](references/backend-example.md). Its `icp.yaml`:
+Scaffold with `icp-cli` and `mops-cli`. Follow the file layout and rules of `writing-motoko` (`types.mo`, `lib/`, `mixins/`, `main.mo`, a `migrations/` chain). [`references/backend-example.md`](references/backend-example.md) demonstrates CMS-style content imports and public reads, with historical local test reports. Adapt it to the actual application; it does not implement a complete CMS or plugin system, and those reports are not evidence of a new migration passing. Its example `icp.yaml`:
 
 ```yaml
 canisters:
@@ -117,7 +119,7 @@ canisters:
 
 Backend rules, each for a reason:
 
-1. **Key every imported table by its legacy primary key (`Nat`).** Old URLs, foreign keys and safe re-imports all depend on it.
+1. **Preserve legacy identifiers and relationships deliberately.** Use the source's numeric, text/UUID or composite keys; the example uses `Nat`. Old URLs, foreign keys and safe re-imports depend on a consistent mapping.
 2. **Import methods are controller-only** (`caller.isController()`: the identity that deploys), **cap the batch size**, and **upsert**, so a failed run can simply be repeated.
 3. **Read methods paginate.** A response over 2 MB traps; never return a whole table.
 4. **Every public update method checks its caller** and rejects the anonymous principal where sign-in is required (`canister-security`).
@@ -140,28 +142,28 @@ Full commands and the converter are in [`references/data-import.md`](references/
 1. **Back up** the old database (`mysqldump --single-transaction`); this copy is never modified.
 2. **Export each table as JSON lines**, one object per row, with the columns already renamed to the Motoko field names:
 
-   ```bash
-   mysql --default-character-set=utf8mb4 --batch --raw --skip-column-names -e "
-     SET time_zone = '+00:00';
-     SELECT JSON_OBJECT('legacyId', id, 'slug', slug, 'title', title, 'bodyHtml', body,
-                        'published', published, 'updatedAt', UNIX_TIMESTAMP(updated_at))
-     FROM pages ORDER BY id;" > export/pages.jsonl
-   ```
+    ```bash
+    mysql --default-character-set=utf8mb4 --batch --raw --skip-column-names -e "
+      SET time_zone = '+00:00';
+      SELECT JSON_OBJECT('legacyId', id, 'slug', slug, 'title', title, 'bodyHtml', body,
+                         'published', published, 'updatedAt', UNIX_TIMESTAMP(updated_at))
+      FROM pages ORDER BY id;" > export/pages.jsonl
+    ```
 
 3. **Convert to Candid batch files** with the stdlib-only `jsonl_to_candid.py` (field types `nat`, `int`, `text`, `bool`, `time`, `variant`, `opt:<type>`):
 
-   ```bash
-   python3 jsonl_to_candid.py export/pages.jsonl batches/pages \
-     legacyId:nat slug:text title:text bodyHtml:text published:bool updatedAt:time
-   ```
+    ```bash
+    python3 jsonl_to_candid.py export/pages.jsonl batches/pages \
+      legacyId:nat slug:text title:text bodyHtml:text published:bool updatedAt:time
+    ```
 
 4. **Import**, stopping at the first failure (re-running is safe because imports upsert):
 
-   ```bash
-   for f in batches/pages-*.did; do
-     icp canister call backend importPages --args-file "$f" -e ic || { echo "failed at $f"; break; }
-   done
-   ```
+    ```bash
+    for f in batches/pages-*.did; do
+      icp canister call backend importPages --args-file "$f" -e ic || { echo "failed at $f"; break; }
+    done
+    ```
 
 5. **Reconcile:** counts from `importCounts` against `SELECT COUNT(*)` per table; spot-check records containing accents, emoji, quotes, tabs and backslashes; compare SHA-256 hashes of migrated files. Keep the results for the hand-over.
 6. **Snapshot** the populated backend before anything risky: `icp canister stop backend -e ic && icp canister snapshot create backend -e ic && icp canister start backend -e ic`.
@@ -206,7 +208,7 @@ Deliver: live URL(s); canister IDs, network and subnet or engine; source locatio
 4. **Non-idempotent imports.** An import that appends instead of upserting creates duplicates when a failed run is repeated. Upsert by legacy id and keep secondary indexes in sync (remove the old index entry when a key such as a slug changes).
 5. **Unguarded import methods.** Every update method is callable by anyone on the internet. Gate imports on `caller.isController()`.
 6. **Expecting `_redirects` to match query strings or capture segments.** Neither is supported: certification needs every response enumerable ahead of time. Build pages at old paths, generate exact rules, and use the mapping page for query-string URLs.
-7. **Rendering pages from the Motoko canister's `http_request`.** Uncertified responses are rejected by verifying gateways, and Motoko has no HTTP-certification library. Serve pages from the static-site canister.
+7. **Treating dynamic HTTP as static-site delivery.** The static-site recipe serves finite files; custom Motoko HTTP rendering needs its own certified-query or query-to-update design. Verify the selected libraries and gateway behavior, including response integrity; see [`references/delivery.md`](references/delivery.md).
 8. **Importing secrets or password hashes into canister state.** Node operators on standard application subnets can read canister memory.
 9. **Changing the sign-in origin after launch.** Users get new principals on a new origin and lose access to their data unless `derivationOrigin` is configured.
 10. **Wrong time zone on `DATETIME`.** `UNIX_TIMESTAMP()` reads a `DATETIME` in the session time zone. Set `SET time_zone` to the zone the PHP app wrote in (`date.timezone`, `date_default_timezone_set`); `TIMESTAMP` columns are stored in UTC and need no adjustment.

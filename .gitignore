@@ -25,3 +25,5 @@ identities/
 # Local machine and review artifacts
 .DS_Store
 attachment-merge-review.json
+.venv-site/
+PR_DESCRIPTION.md

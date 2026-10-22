@@ -5,10 +5,10 @@ An agent skill that moves an existing PHP website or application to the Internet
 ## Install
 
 ```bash
-npx skills add JoshDFN/php-to-motoko-skill --skill migrating-php-apps
+npx skills add JoshDFN/php-to-motoko-skill
 ```
 
-Install the official ICP skills it builds on: `npx skills add dfinity/icskills`.
+The skills CLI requires Node.js 22.20 or later. Run from your PHP project folder and select your coding agent. Relevant supporting ICP skills are available with `npx skills add dfinity/icskills`; load only the guidance needed for the application.
 
 ## Use
 
@@ -16,31 +16,36 @@ Give your coding agent, in the PHP project:
 
 > Load the migrating-php-apps skill and the ICP skills listed at https://skills.internetcomputer.org/llms.txt. Then move this PHP app to the Internet Computer: the backend in Motoko and the frontend on ICP, with its data, users and links. Inventory everything first, propose the plan, and wait for my approval before changing anything.
 
-## Reported testing
+## Validation scope
 
-The following results are reports from the supplied source package’s author. They have not been independently rerun for this GitHub update. This repository includes the supplied fixtures and repeatable test suite; check the [GitHub Actions results](https://github.com/JoshDFN/php-to-motoko-skill/actions) for the checks executed against each revision.
-
-Full migrations of real WordPress 7.1 (including Contact Form 7, Yoast SEO, WooCommerce, Advanced Custom Fields, Elementor and Polylang) and Drupal 11.4 sites on a local ICP network; the platform notes checked against real Joomla 6, Laravel 13, Symfony 7.4 and CodeIgniter 4.7 installs and Magento 2.4's schema; Motoko timers, post-launch data-model changes, browser bindings and both deployment targets verified. `PR-DESCRIPTION.md` preserves the supplied author’s detailed test report and reported CI results.
+The supplied source package reports local WordPress and Drupal migrations, platform-note checks, timers, state upgrades and both frontend-hosting targets. `PR-DESCRIPTION.md` records those author-reported observations. They are not new results from generating the website copies. The repository includes repeatable tests, but an export/import snapshot does not establish that every form, checkout, access rule or plugin behavior has been rebuilt. Validate the actual application's agreed journeys.
 
 ## Websites that carry the skill
 
-The public migration site is [Move to Motoko](https://www.movetomotoko.com/). It carries the readable workflow, raw Markdown and skill ZIP generated from this repository.
+The published websites are [PHP to Motoko](https://www.phptomotoko.com/) and [Move to Motoko](https://www.movetomotoko.com/). Both carry the readable workflow, raw Markdown and skill ZIP generated from this repository.
 
-This repository is the only place the skill is edited. A website gets a copy: run `tools/sync-site.sh <site>/dist` before every deploy of that site. It copies the raw files (which agents read), rebuilds the download zip, and renders the readable pages into `<site>/dist/skills/migrating-php-apps/`. Never edit the files under a site's `skills/` folder; the next sync overwrites them.
+This repository is the only place the skill is edited. A website gets a copy: run `tools/sync-site.sh <site>/dist` before every deploy of that site. It copies the raw files (which agents read), rebuilds the download zip, and renders the readable pages into `<site>/dist/skills/migrating-php-apps/`. Never edit the files under a site's `skills/` folder; the next sync overwrites them. The command uses Python 3 and `zip`; renderer packages are installed into the ignored `.venv-site` in this checkout.
+
+Use the generated readable pages for human-facing workflow and reference links. Keep the agent prompt and AI notes linked to the raw `.md` files. Run the site's own build/versioning step after syncing, check its links and browser output, and review the result before publishing.
+
+The renderer supports PHP to Motoko and Move to Motoko using each site's existing
+fonts and assets. It selects the design from the homepage's canonical hostname,
+so a cross-link between the sites cannot switch the design. Both designs share
+the same Markdown parsing and raw skill files. Move's documentation CSS and script
+are generated locally alongside its readable pages.
 
 ## Tests
 
-`tests/` is the supplied suite for exercising the documented migration steps on a fresh machine: the Motoko backend on a local ICP network (import, access control, upgrades, timers, a post-go-live migration), a real WordPress site with the common plugins, a real Drupal site, and the platform notes against Joomla, Laravel, Symfony, CodeIgniter and Magento. `bash tests/run-all.sh` runs them all; `.github/workflows/tests.yml` runs them on every push. See `tests/README.md`.
+`tests/` checks documented components: the Motoko backend on a local ICP network, WordPress and Drupal fixtures, and platform notes. `bash tests/run-all.sh` runs the suite; `.github/workflows/tests.yml` defines the CI run. These checks have explicit limits and do not prove universal CMS/plugin compatibility. See `tests/README.md` for prerequisites and individual checks.
 
-## Repository maintenance
+## Repository updates
 
 ```bash
-git clone git@github.com:JoshDFN/php-to-motoko-skill.git
-cd php-to-motoko-skill
-# Make and review changes, then commit and push to main.
+git pull --ff-only
+bash tools/sync-site.sh /absolute/path/to/site/dist
 ```
 
-The workflow runs on pushes to `main` and pull requests; results appear under the repository’s Actions tab. `npx skills add JoshDFN/php-to-motoko-skill --skill migrating-php-apps` installs the published skill.
+The canonical repository is [JoshDFN/php-to-motoko-skill](https://github.com/JoshDFN/php-to-motoko-skill). Syncing generates local website files; it does not publish the repository or deploy the site. Commit and publish reviewed source changes through the repository's normal process.
 
 ## Layout
 

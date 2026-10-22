@@ -60,27 +60,49 @@ assert_contains "finds WP-Cron" "$out" "wp-cron.php"
 lines=$(printf '%s' "$out" | grep -c '^- ' || true); [ "$lines" -lt 60 ] && ok "inventory is focused ($lines list lines)" || fail "inventory too noisy ($lines list lines)"
 
 section "export with the skill's WordPress script"
-section_block "$SKILL/references/frameworks.md" "## WordPress" php "$WPDIR/export.php"
-(cd "$WPDIR" && rm -rf export && $W eval-file export.php > "$WORK/wp-export.log" 2>&1) && ok "export script ran" || { fail "export script"; cat "$WORK/wp-export.log"; }
-python3 - "$WPDIR/export" "$PLUGINS" <<'PY' > "$WORK/wp-export-check.txt"
+WPSCRIPTS="$WORK/wp-private-scripts"; WPEXPORT="$WORK/wp-private-export"
+(umask 077; mkdir -p "$WPSCRIPTS"); rm -rf "$WPEXPORT"
+section_block "$SKILL/references/frameworks.md" "## Scoped export helpers" php "$WPSCRIPTS/export-support.php"
+section_block "$SKILL/references/frameworks.md" "## WordPress" php "$WPSCRIPTS/wp-export.php"
+# Fixture-only approval: these IDs were created by this test; published status alone is not production approval.
+POST_IDS=$($W post list --post_type=page,post --post_status=publish --field=ID | paste -sd, -)
+USER_IDS=$($W user list --field=ID | paste -sd, -)
+(cd "$WPDIR" && MIGRATION_WEB_ROOTS="$WPDIR" MIGRATION_EXPORT_DIR="$WPEXPORT" \
+  MIGRATION_PUBLIC_POST_IDS="$POST_IDS" MIGRATION_USER_IDS="$USER_IDS" \
+  $W eval-file "$WPSCRIPTS/wp-export.php" > "$WORK/wp-export.log" 2>&1) && ok "export script ran" || { fail "export script"; cat "$WORK/wp-export.log"; }
+python3 - "$WPEXPORT" "$PLUGINS" <<'PY' > "$WORK/wp-export-check.txt"
 import json, sys, re
 ex, plugins = sys.argv[1], sys.argv[2]
-pages = {r["slug"]: r for r in map(json.loads, open(f"{ex}/pages.jsonl"))}
+# Explicit fixture adapter: retain raw metadata and map only this fixture's routes and roles to the example DTOs.
+rows = list(map(json.loads, open(f"{ex}/content.jsonl")))
+for r in rows:
+    if "?" in r["route"]: raise ValueError("fixture route needs an explicit query mapping")
+    r["slug"] = r["route"].strip("/")
+for kind, filename in (("page", "pages"), ("post", "news")):
+    with open(f"{ex}/{filename}.jsonl", "w") as f:
+        for r in rows:
+            if r["postType"] == kind: f.write(json.dumps(r, ensure_ascii=False) + "\n")
+users = list(map(json.loads, open(f"{ex}/users.jsonl")))
+roles = {frozenset(["administrator"]): "administrator", frozenset(["editor"]): "editor"}
+for u in users: u["role"] = roles[frozenset(u["sourceRoles"])]  # unknown/multiple fixture roles fail closed
+with open(f"{ex}/users.jsonl", "w") as f:
+    for u in users: f.write(json.dumps(u, ensure_ascii=False) + "\n")
+pages = {r["slug"]: r for r in rows if r["postType"] == "page"}
 print("drafts excluded:", "concept-beleid" not in pages)
 print("unicode intact:", pages["english"]["title"] == "Résidents & visitors – Ünïcode ✓ 🚲")
 print("tabs and backslashes intact:", "tabs\tand backslashes \\ here" in pages["english"]["bodyHtml"].replace("&#8217;", "'"))
 if "elementor" in plugins: print("page-builder page rendered:", len(pages["over-ons"]["bodyHtml"]) > 100)
 if "polylang" in plugins: print("language exported:", pages["afval"].get("language") == "nl")
 if "contact-form-7" in plugins: print("contact form rendered (a feature, not content):", "<form" in pages["contact"]["bodyHtml"])
+print("no leftover shortcode syntax in fixture HTML:", not any(re.search(r'\[[A-Za-z][A-Za-z0-9_-]*(?:\s[^]]*)?/?\]', r["bodyHtml"]) for r in rows))
 users = [json.loads(l) for l in open(f"{ex}/users.jsonl")]
 print("no password hashes:", all("pass" not in json.dumps(u).lower() for u in users))
 print("roles are WordPress roles:", {u["role"] for u in users} <= {"administrator", "editor", "author", "contributor", "subscriber"})
 PY
 while IFS=: read -r name val; do assert_eq "$name" "$(printf '%s' "$val" | tr -d ' ')" "True"; done < "$WORK/wp-export-check.txt"
-leftovers=$(grep -oh '\[[a-z0-9_-]*' "$WPDIR"/export/*.jsonl | sort -u | tr '\n' ' ' || true); assert_eq "no leftover shortcodes" "${leftovers:-none}" "none"
 
 section "Phase 3 and 4: convert, deploy the documented backend, import, reconcile"
-P="$WORK/wp-backend"; project_from_docs "$P"; mkdir -p "$P/export"; cp "$WPDIR"/export/*.jsonl "$P/export/"; convert_exports "$P"
+P="$WORK/wp-backend"; project_from_docs "$P"; mkdir -p "$P/export"; cp "$WPEXPORT"/*.jsonl "$P/export/"; convert_exports "$P"
 (cd "$P" && timeout 600 mops install >/dev/null 2>&1); net_start "$P" && deploy "$P" backend && ok "backend deployed" || fail "deploy"
 import_all "$P" "$P/batches" > "$WORK/wp-import.log"; assert_missing "every batch imported" "$(cat "$WORK/wp-import.log")" "err"
 c=$(counts "$P"); db_pages=$(rosql wp "SELECT COUNT(*) FROM wp_posts WHERE post_type='page' AND post_status='publish'"); db_posts=$(rosql wp "SELECT COUNT(*) FROM wp_posts WHERE post_type='post' AND post_status='publish'"); db_users=$(rosql wp "SELECT COUNT(*) FROM wp_users")

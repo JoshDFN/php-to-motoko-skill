@@ -23,7 +23,7 @@ $dir = "public://2026-10"; \Drupal::service("file_system")->prepareDirectory($di
 file_put_contents("sites/default/files/2026-10/kaart.pdf", "%PDF-1.4 test"); File::create(["uri"=>"public://2026-10/kaart.pdf","filename"=>"kaart.pdf","status"=>1])->save();
 $u = User::create(["name"=>"redacteur","mail"=>"editor@example.org","status"=>1]); $u->addRole("content_editor"); $u->save();
 echo "NIDS ", $n1->id(), " ", $n2->id(), " ", $n3->id(), " ", $a1->id(), "\n";' > "$WORK/drupal-seed.log" 2>&1) && ok "content, aliases, a managed file and users seeded" || { fail "seed"; cat "$WORK/drupal-seed.log"; }
-read -r _ N1 N2 N3 _ < <(grep NIDS "$WORK/drupal-seed.log")
+read -r _ N1 N2 N3 A1 < <(grep NIDS "$WORK/drupal-seed.log")
 
 section "Phase 1: the inventory script, from the project root"
 inv=$(inventory_script); out=$(cd "$D" && bash "$inv" 2>/dev/null)
@@ -39,11 +39,40 @@ assert_eq "file_managed uri uses public://" "$(rosql drupal "SELECT uri FROM fil
 assert_contains "drush sql:query with the documented flags keeps Unicode" "$(cd "$D" && $DR sql:query --extra="--default-character-set=utf8mb4 --batch --raw" "SELECT title FROM node_field_data WHERE nid=$N2" 2>/dev/null)" "Ünïcode ✓ 🚲"
 
 section "export with the skill's Drupal script (drush php:script)"
-mkdir -p "$D/dr-export/export"; section_block "$SKILL/references/frameworks.md" "## Drupal 8 and later" php "$D/dr-export/export.php"
-(cd "$D/dr-export" && ../vendor/bin/drush php:script export.php > "$WORK/dr-export.log" 2>&1) && ok "export script ran" || { fail "export script"; tail -5 "$WORK/dr-export.log"; }
-python3 - "$D/dr-export/export" <<'PY' > "$WORK/dr-export-check.txt"
+DRSCRIPTS="$WORK/drupal-private-scripts"; DREXPORT="$WORK/drupal-private-export"
+(umask 077; mkdir -p "$DRSCRIPTS"); rm -rf "$DREXPORT"
+section_block "$SKILL/references/frameworks.md" "## Scoped export helpers" php "$DRSCRIPTS/export-support.php"
+section_block "$SKILL/references/frameworks.md" "## Drupal 8 and later" php "$DRSCRIPTS/drupal-export.php"
+# Fixture-only approval: only the seeded published nodes and known synthetic users are selected.
+PUBLIC_TRANSLATIONS=$(cd "$D" && $DR php:eval 'foreach (\Drupal\node\Entity\Node::loadMultiple(['"$N1,$N2,$A1"']) as $n) { $ids[] = $n->id() . ":" . $n->language()->getId(); } echo implode(",", $ids);')
+USER_IDS=$(cd "$D" && $DR php:eval 'foreach (\Drupal::entityTypeManager()->getStorage("user")->loadMultiple() as $u) { if ($u->id() > 0) $ids[] = $u->id(); } echo implode(",", $ids);')
+(cd "$D" && MIGRATION_WEB_ROOTS="$D/web" MIGRATION_EXPORT_DIR="$DREXPORT" \
+  MIGRATION_PUBLIC_NODE_TRANSLATIONS="$PUBLIC_TRANSLATIONS" MIGRATION_USER_IDS="$USER_IDS" \
+  $DR php:script "$DRSCRIPTS/drupal-export.php" > "$WORK/dr-export.log" 2>&1) && ok "export script ran" || { fail "export script"; tail -5 "$WORK/dr-export.log"; }
+python3 - "$DREXPORT" <<'PY' > "$WORK/dr-export-check.txt"
 import json, sys
-ex = sys.argv[1]; pages = {r["slug"]: r for r in map(json.loads, open(f"{ex}/pages.jsonl"))}
+ex = sys.argv[1]
+# Explicit single-language fixture adapter; production translation keys and role policies need their own mapping.
+rows = list(map(json.loads, open(f"{ex}/content.jsonl")))
+if len({r["legacyId"] for r in rows}) != len(rows): raise ValueError("fixture needs language-aware IDs")
+for r in rows:
+    if "?" in r["route"]: raise ValueError("fixture route needs an explicit query mapping")
+    r["slug"] = r["alias"].strip("/")
+for kind, filename in (("page", "pages"), ("article", "news")):
+    with open(f"{ex}/{filename}.jsonl", "w") as f:
+        for r in rows:
+            if r["contentType"] == kind: f.write(json.dumps(r, ensure_ascii=False) + "\n")
+users = list(map(json.loads, open(f"{ex}/users.jsonl")))
+for u in users:
+    roles = set(u["sourceRoles"]) - {"authenticated"}
+    if u["legacyId"] == 1 and roles <= {"administrator"}: u["role"] = "administrator"  # known fixture owner
+    elif roles == {"content_editor"}: u["role"] = "editor"
+    else: raise ValueError("fixture role mapping is not approved")
+with open(f"{ex}/users.jsonl", "w") as f:
+    for u in users: f.write(json.dumps(u, ensure_ascii=False) + "\n")
+with open(f"{ex}/node-aliases.tsv", "w") as f:
+    for r in rows: f.write(f'/node/{r["legacyId"]}\t{r["alias"]}\n')
+pages = {r["slug"]: r for r in rows if r["contentType"] == "page"}
 print("unpublished node excluded:", "concept-beleid" not in pages and len(pages) == 2)
 print("alias used as slug:", "afval" in pages and "english" in pages)
 print("unicode intact:", pages["english"]["title"] == "Résidents & visitors – Ünïcode ✓ 🚲")
@@ -55,7 +84,7 @@ PY
 while IFS=: read -r name val; do assert_eq "$name" "$(printf '%s' "$val" | tr -d ' ')" "True"; done < "$WORK/dr-export-check.txt"
 
 section "convert, deploy the documented backend, import, reconcile"
-P="$WORK/drupal-backend"; project_from_docs "$P"; mkdir -p "$P/export"; cp "$D"/dr-export/export/*.jsonl "$P/export/"; convert_exports "$P"
+P="$WORK/drupal-backend"; project_from_docs "$P"; mkdir -p "$P/export"; cp "$DREXPORT"/*.jsonl "$P/export/"; convert_exports "$P"
 (cd "$P" && timeout 600 mops install >/dev/null 2>&1); net_start "$P" && deploy "$P" backend && ok "backend deployed" || fail "deploy"
 import_all "$P" "$P/batches" > "$WORK/dr-import.log"; assert_missing "every batch imported" "$(cat "$WORK/dr-import.log")" "err"
 c=$(counts "$P")
@@ -65,7 +94,7 @@ assert_eq "users reconcile" "$(count_of "$c" legacyUsers)" "$(rosql drupal "SELE
 
 section "frontend: alias paths, /node/<nid> redirects, managed files"
 rm -rf "$P/dist"; build_pages "$P/dist" "$P/export" file >/dev/null
-python3 - "$P/dist" "$D/dr-export/export" <<'PY'
+python3 - "$P/dist" "$DREXPORT" <<'PY'
 import json, sys, pathlib
 d, ex = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 published = {json.loads(l)["legacyId"] for f in ("pages.jsonl", "news.jsonl") for l in open(ex / f)}
