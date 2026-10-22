@@ -4,6 +4,7 @@ The scripts check components using code **from the skill's own documentation**. 
 
 | Script | What it checks | Needs |
 |---|---|---|
+| `test-cli-output.sh` | fixture ID parsing, preserved CLI failures and visible plugin notices | bash |
 | `test-lint.sh` | every shell and PHP block is valid; `skill-validator` (the icskills CI tool) passes; the icskills project checks pass | shellcheck, php, node 22, npm 11, git |
 | `test-backend.sh` | the documented Motoko backend type-checks, deploys, imports the plain-PHP fixture, reconciles, is idempotent, refuses non-controllers, keeps data across upgrades, runs timers, and takes a post-go-live migration | icp-cli, mops |
 | `test-wordpress.sh` | a real WordPress site with the common plugins (Contact Form 7, Yoast, WooCommerce, ACF, Elementor, Polylang) goes through inventory, export, import and comes out at its old permalinks | php, MariaDB or MySQL, icp-cli, mops |

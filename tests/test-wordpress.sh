@@ -7,19 +7,6 @@ command -v wp >/dev/null 2>&1 || { mkdir -p "$WORK/bin"; curl -sL https://raw.gi
 PLUGINS="${PLUGINS:-contact-form-7 wordpress-seo woocommerce advanced-custom-fields elementor polylang}"
 WPDIR="$WORK/wordpress"; W="wp --allow-root --path=$WPDIR"
 
-# Plugins can print PHP notices to stdout even with --porcelain. Accept exactly one
-# numeric result, keep the notices visible, and preserve a failed command's status.
-wp_id() {
-  local output id
-  output=$($W "$@") || return "$?"
-  id=$(printf '%s\n' "$output" | awk '/^[0-9]+$/ { id=$0; n++ } END { if (n == 1) print id; else exit 1 }') || {
-    printf 'Expected one WordPress ID, got:\n%s\n' "$output" >&2
-    return 1
-  }
-  [ "$output" = "$id" ] || printf 'WordPress output accompanying ID %s:\n%s\n' "$id" "$output" >&2
-  printf '%s\n' "$id"
-}
-
 section "install WordPress and seed it"
 db_start && db_create wp && ok "database ready" || fail "database"
 rm -rf "$WPDIR" && mkdir -p "$WORK" && (cd "$WORK" && curl -sL https://wordpress.org/latest.tar.gz | tar xz)
@@ -41,7 +28,7 @@ def chunk(t, d): return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zl
 open(sys.argv[1], "wb").write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
 PY
 $W media import "$WORK/kaart.png" --title="Kaart" --post_id="$P1" --porcelain >/dev/null
-if $W plugin is-active contact-form-7 2>/dev/null; then F=$($W post list --post_type=wpcf7_contact_form --field=ID | head -1); $W post create --post_type=page --post_status=publish --post_title="Contact" --post_name=contact --post_content="[contact-form-7 id=\"$F\"]" --porcelain >/dev/null; fi
+if $W plugin is-active contact-form-7 2>/dev/null; then F=$(wp_id post list --post_type=wpcf7_contact_form --field=ID); $W post create --post_type=page --post_status=publish --post_title="Contact" --post_name=contact --post_content="[contact-form-7 id=\"$F\"]" --porcelain >/dev/null; fi
 if $W plugin is-active elementor 2>/dev/null; then
   P3=$(wp_id post create --post_type=page --post_status=publish --post_title="Over ons" --post_name=over-ons --post_content="" --porcelain)
   $W post meta update "$P3" _elementor_edit_mode builder >/dev/null; $W post meta update "$P3" _elementor_template_type wp-page >/dev/null
@@ -65,8 +52,8 @@ WPSCRIPTS="$WORK/wp-private-scripts"; WPEXPORT="$WORK/wp-private-export"
 section_block "$SKILL/references/frameworks.md" "## Scoped export helpers" php "$WPSCRIPTS/export-support.php"
 section_block "$SKILL/references/frameworks.md" "## WordPress" php "$WPSCRIPTS/wp-export.php"
 # Fixture-only approval: these IDs were created by this test; published status alone is not production approval.
-POST_IDS=$($W post list --post_type=page,post --post_status=publish --field=ID | paste -sd, -)
-USER_IDS=$($W user list --field=ID | paste -sd, -)
+POST_IDS=$(wp_ids post list --post_type=page,post --post_status=publish --field=ID)
+USER_IDS=$(wp_ids user list --field=ID)
 (cd "$WPDIR" && MIGRATION_WEB_ROOTS="$WPDIR" MIGRATION_EXPORT_DIR="$WPEXPORT" \
   MIGRATION_PUBLIC_POST_IDS="$POST_IDS" MIGRATION_USER_IDS="$USER_IDS" \
   $W eval-file "$WPSCRIPTS/wp-export.php" > "$WORK/wp-export.log" 2>&1) && ok "export script ran" || { fail "export script"; cat "$WORK/wp-export.log"; }

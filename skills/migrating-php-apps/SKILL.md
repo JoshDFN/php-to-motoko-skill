@@ -12,7 +12,7 @@ metadata:
 
 ## What This Is
 
-A workflow for taking a running PHP site or application, with its data, users and URLs, to the Internet Computer. Examples and historical test reports cover specific scenarios; validate the actual application's features and integrations. The default architecture:
+Move a running PHP application, its data, users and URLs to the Internet Computer. Historical tests cover specific scenarios; verify the actual features and integrations. Default architecture:
 
 ```text
 Browser ── HTTPS ──> HTTP gateway ──> frontend canister (@dfinity/static-site, certified-assets)
@@ -23,7 +23,7 @@ Sign-in: Internet Identity    Scheduled jobs: timers    Outbound APIs: HTTPS out
 Domain: custom-domains        No PHP runtime, web server, database server or OS left to patch
 ```
 
-Why this shape: the static-site canister certifies every response ahead of time, so it serves a **finite set of files**. This architecture builds pages ahead of time or renders them in the browser from backend data. ICP also supports request-time HTTP rendering, including in Motoko through query-to-update delivery; certification is not a Rust-only protocol. For custom HTTP routes, choose and test the certification or update path described in [`references/delivery.md`](references/delivery.md), and read its integrity constraints before considering certification opt-outs.
+The static-site canister certifies a **finite set of files** ahead of time. Build pages ahead of time or render them in the browser from backend data. For request-time Motoko HTTP, choose and test certified queries or query-to-update delivery using [`references/delivery.md`](references/delivery.md). Read its integrity constraints before considering certification opt-outs.
 
 This skill orchestrates the migration. Load these skills for the details it delegates: `writing-motoko` (all Motoko code), `migrating-motoko-actors` (state changes after go-live), `mops-cli`, `icp-cli`, `static-site`, `internet-identity`, `canister-security`, `https-outcalls`, `custom-domains`, `cycles-management`; and when relevant `multi-canister` (data beyond one canister), `vetkeys` / `encrypted-maps` (data that must stay confidential), `deploy-to-cloud-engine` and `cloud-engine-canisters` (organization-owned capacity).
 
@@ -55,7 +55,7 @@ Run the read-only inventory script from [`references/inventory.md`](references/i
 bash php-inventory.sh > inventory.md
 ```
 
-It reports the platform (WordPress, Drupal, Joomla, Magento, Laravel, Symfony, CodeIgniter or plain PHP), entry points, `.htaccess` rewrite rules, which files use sessions, logins, forms, uploads, email, outbound HTTP, shell commands, image/PDF libraries and the database, plus SQL tables, scheduled jobs, upload directory sizes, and the **names** (never values) of configuration secrets.
+It reports the platform, entry points, `.htaccess` rewrite rules, code using sessions, logins, forms, uploads, email, outbound HTTP, shell commands, image/PDF libraries and the database, plus SQL tables, scheduled jobs, upload sizes, and configuration secret **names**, never values.
 
 Then collect what the script cannot see:
 
@@ -103,7 +103,7 @@ Present the feature map, the target and the gaps; get sign-off.
 
 ## Phase 3: Build
 
-Scaffold with `icp-cli` and `mops-cli`. Follow the file layout and rules of `writing-motoko` (`types.mo`, `lib/`, `mixins/`, `main.mo`, a `migrations/` chain). [`references/backend-example.md`](references/backend-example.md) demonstrates CMS-style content imports and public reads, with historical local test reports. Adapt it to the actual application; it does not implement a complete CMS or plugin system, and those reports are not evidence of a new migration passing. Its example `icp.yaml`:
+Scaffold with `icp-cli` and `mops-cli`. Follow the file layout and rules of `writing-motoko` (`types.mo`, `lib/`, `mixins/`, `main.mo`, a `migrations/` chain). [`references/backend-example.md`](references/backend-example.md) demonstrates content imports and public reads, not a complete CMS or plugin system. Adapt it to the application; historical local test reports do not establish that a new migration passes. Its example `icp.yaml`:
 
 ```yaml
 canisters:
@@ -220,3 +220,5 @@ Deliver: live URL(s); canister IDs, network and subnet or engine; source locatio
 16. **Assuming default security headers.** The static-site canister adds none; declare them in `_headers`.
 17. **Reporting success from exit codes.** An importer that exits 0 has not proven the data is right. Reconcile counts, spot-check records and verify journeys on the live origin.
 18. **Local security tests can lie.** A fresh icp-cli deploys as `anonymous`, then the only controller, so anonymous calls pass `caller.isController()` locally. Hand the canister to a named identity first (`icp canister settings update backend --add-controller <dev> --remove-controller 2vxsx-fae -e local`).
+
+License: [Apache-2.0](LICENSE.txt).

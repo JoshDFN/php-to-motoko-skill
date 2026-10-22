@@ -4,16 +4,18 @@
 source "$(dirname "$0")/lib.sh"
 need shellcheck php python3 node curl git
 
+bash "$ROOT/tests/test-cli-output.sh"
+
 section "shell blocks (ShellCheck) and PHP blocks (php -l)"
 bad=0; total=0
 for f in "$SKILL/SKILL.md" "$SKILL"/references/*.md; do
   n=$(python3 -c "import re,sys; print(len(re.findall(r'\`\`\`bash\n(.*?)\`\`\`', open(sys.argv[1]).read(), re.S)))" "$f")
-  for i in $(seq 0 $((n - 1))); do
+  for ((i=0; i<n; i++)); do
     total=$((total + 1)); extract_block "$f" bash "$i" "$WORK/block.sh"
     if ! shellcheck -S warning -s bash "$WORK/block.sh" >/dev/null 2>&1; then bad=$((bad + 1)); echo "  ShellCheck: $(basename "$f") bash block $i"; shellcheck -S warning -s bash "$WORK/block.sh" | head -8; fi
   done
   m=$(python3 -c "import re,sys; print(len(re.findall(r'\`\`\`php\n(.*?)\`\`\`', open(sys.argv[1]).read(), re.S)))" "$f")
-  for i in $(seq 0 $((m - 1))); do
+  for ((i=0; i<m; i++)); do
     total=$((total + 1)); extract_block "$f" php "$i" "$WORK/block.php"
     php -l "$WORK/block.php" >/dev/null 2>&1 || { bad=$((bad + 1)); echo "  PHP syntax: $(basename "$f") php block $i"; }
   done
@@ -26,7 +28,20 @@ if ! command -v skill-validator >/dev/null 2>&1; then
   mkdir -p "$WORK/bin"; curl -sL "https://github.com/agent-ecosystem/skill-validator/releases/download/v${SV_VERSION}/skill-validator_${SV_VERSION}_linux_amd64.tar.gz" | tar xz -C "$WORK/bin" skill-validator
   export PATH="$WORK/bin:$PATH"
 fi
-skill-validator check "$SKILL" --skip links -o markdown > "$WORK/sv.md" 2>&1 || true
+# The downloadable/installable package carries its legal license. Check that
+# exact layout and license bytes before permitting the validator's flat file layout.
+python3 - "$SKILL" "$ROOT/LICENSE.txt" <<'PYLAYOUT'
+from pathlib import Path
+import sys
+skill, license_file = map(Path, sys.argv[1:])
+assert {p.name for p in skill.iterdir()} == {"SKILL.md", "LICENSE.txt", "references"}, "unexpected skill-root entry"
+assert (skill / "references").is_dir(), "missing references directory"
+assert (skill / "LICENSE.txt").read_bytes() == license_file.read_bytes(), "packaged license differs from source"
+PYLAYOUT
+validator_status=0
+skill-validator check "$SKILL" --skip links --allow-flat-layouts -o markdown > "$WORK/sv.md" 2>&1 || validator_status=$?
+cat "$WORK/sv.md"
+assert_eq "skill-validator exits successfully" "$validator_status" "0"
 assert_contains "skill-validator passes with no warnings" "$(grep -o 'Result: [a-z 0-9]*' "$WORK/sv.md")" "Result: passed"
 assert_contains "SKILL.md body under 5000 tokens" "$(grep -E 'SKILL.md body' "$WORK/sv.md" | head -1)" "SKILL.md body | [0-4],"
 

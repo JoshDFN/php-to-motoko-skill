@@ -25,6 +25,30 @@ section()         { echo; echo "== $1"; }
 
 need() { for t in "$@"; do command -v "$t" >/dev/null 2>&1 || { echo "missing tool: $t (see tests/README.md)"; exit 2; }; done; }
 
+# wp-cli output can include plugin notices even with --field=ID or --porcelain.
+# Keep diagnostics visible and command failures intact; return only positive,
+# distinct IDs for the synthetic fixture's explicitly approved export scope.
+wp_ids() {
+  local output ids expected
+  output=$($W "$@") || return "$?"
+  ids=$(printf '%s\n' "$output" | awk '/^[1-9][0-9]*$/ {
+      if (seen[$0]++) duplicate=1
+      ids=ids (n++ ? "," : "") $0
+    } END { if (n && !duplicate) print ids; else exit 1 }') || {
+    printf 'Expected distinct positive WordPress IDs, got:\n%s\n' "$output" >&2
+    return 1
+  }
+  expected=$(printf '%s' "$ids" | tr ',' '\n')
+  [ "$output" = "$expected" ] || printf 'WordPress output accompanying IDs:\n%s\n' "$output" >&2
+  printf '%s\n' "$ids"
+}
+wp_id() {
+  local id
+  id=$(wp_ids "$@") || return "$?"
+  case "$id" in *,*) printf 'Expected one WordPress ID, got: %s\n' "$id" >&2; return 1;; esac
+  printf '%s\n' "$id"
+}
+
 # --- scripts and code blocks taken from the docs --------------------------------------------------
 # extract_block FILE LANG NTH OUT   (NTH counts from 0 among blocks of that language; "longest" picks the longest)
 extract_block() {
