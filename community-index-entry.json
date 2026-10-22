@@ -1,0 +1,8 @@
+{
+  "name": "migrating-php-apps",
+  "title": "Migrating PHP Apps to Motoko",
+  "description": "Move an existing PHP website or web app to the Internet Computer with a Motoko backend: WordPress and Drupal sites, Joomla and Magento stores, Laravel, Symfony or CodeIgniter apps, and plain PHP on MySQL or PostgreSQL. Covers the inventory, the plan the owner approves, the backend and frontend rebuild, data import, Internet Identity sign-in and cut-over with old URLs kept.",
+  "maintainer": "JoshDFN",
+  "github": "https://github.com/JoshDFN/php-to-motoko-skill/tree/main/skills/migrating-php-apps",
+  "added": "2026-10-21"
+}

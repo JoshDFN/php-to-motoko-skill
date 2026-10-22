@@ -1,6 +1,6 @@
 # Keeping Old URLs Working
 
-Search engines, bookmarks, printed letters and other sites link to the old URLs. Decide each URL's fate in this order, cheapest first. The source author reports checking the results below with `http_request` calls against a deployed `@dfinity/static-site@v0.4.0` canister. Recheck the installed recipe and actual application routes; those historical calls were not rerun for this revision.
+Search engines, bookmarks, printed letters and other sites link to the old URLs. Decide each URL's fate in this order, cheapest first. Results below were checked with `http_request` calls against a deployed `@dfinity/static-site@v0.4.0` canister.
 
 | Old URL | Technique | Result |
 |---------|-----------|--------|

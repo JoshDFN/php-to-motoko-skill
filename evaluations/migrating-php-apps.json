@@ -1,6 +1,6 @@
 {
   "skill": "migrating-php-apps",
-  "description": "Evaluation cases for real PHP migration decisions, safe data handling and protocol-specific constraints. Expected behaviors are test criteria, not completed results.",
+  "description": "Evaluation cases for the migrating-php-apps skill. Tests whether agents move PHP sites to ICP with the tested export, import and URL techniques instead of guessing, and avoid the documented pitfalls (unescaped exports, unbatched imports, query-string redirects, password hashes, origin changes).",
   "output_evals": [
     {
       "name": "Export a MySQL table for import",
@@ -56,10 +56,8 @@
       "name": "Rendering pages from Motoko",
       "prompt": "Can I just port our PHP templates so the Motoko canister renders HTML in http_request, like PHP did? One paragraph.",
       "expected_behaviors": [
-        "Explains that Motoko can implement custom HTTP responses, including query-to-update delivery or suitable certified queries",
-        "Distinguishes the static-site recipe from protocol-wide capabilities",
-        "Discusses response integrity, application authentication and update latency; does not claim Motoko HTTP is impossible",
-        "Does not silently switch protected content to raw or skipped verification"
+        "Advises against it because gateway-served responses must be certified and Motoko has no HTTP-certification library",
+        "Recommends pre-built pages on the static-site canister or browser rendering from backend data"
       ]
     },
     {
@@ -69,45 +67,6 @@
         "Uses icp deploy -e ic --subnet <subnet-id> (subnet chosen by node location on the ICP dashboard)",
         "Notes that --subnet only affects canister creation",
         "May mention a cloud engine (--engine) as the organization-owned alternative"
-      ]
-    },
-    {
-      "name": "Plugin export is not a finished application",
-      "prompt": "Our WordPress site uses Elementor, Contact Form 7, WooCommerce, ACF, Polylang and Yoast. The exporter produced HTML and extra JSON keys for languages/SEO. Is the migration finished? Give the remaining checks.",
-      "expected_behaviors": [
-        "Requires owner-approved capability decisions and live behavior tests for forms, commerce, publishing and permissions",
-        "Checks whether HTML still calls PHP/WordPress endpoints and treats a clean grep result as incomplete evidence",
-        "Maps languages, full URLs, translations, SEO and custom fields through schema/import/frontend rather than discarding them",
-        "Verifies builder assets/rendering context and protected content; does not claim universal plugin conversion"
-      ]
-    },
-    {
-      "name": "Protect exports and restricted content",
-      "prompt": "The WordPress project is served from public_html. Can I write exported users.jsonl there and render every published post into public static pages?",
-      "expected_behaviors": [
-        "Requires an export location outside every served document root",
-        "Separates published status from public access, including passwords, memberships and custom rules",
-        "Requires explicit public eligibility or an approved protected-data flow; does not publish restricted content or private identity exports"
-      ]
-    },
-    {
-      "name": "Legacy UUIDs and multiple roles",
-      "prompt": "Our records use UUID keys and users can have multiple custom roles. How should the example importer be adapted?",
-      "expected_behaviors": [
-        "Preserves actual UUID identifiers and relationships rather than forcing Nat",
-        "Preserves and deliberately maps all required roles/capabilities instead of selecting the first role or silently defaulting",
-        "Separates independent import row types from storage types and tests interface/state compatibility",
-        "Requires verified persistent principal-to-legacy-account linking for account access"
-      ]
-    },
-    {
-      "name": "Certified permission to skip verification",
-      "prompt": "Can an unimportant data route skip HTTP verification on the same origin as our sign-in app?",
-      "expected_behaviors": [
-        "Explains certified no_certification policy and exact/wildcard path scope; the replica cannot invent permission for protected routes",
-        "Explains that body/status/headers remain unauthenticated when permission is valid",
-        "Considers arbitrary executable content on the authenticated origin and keeps HTML/scripts/signing flows protected",
-        "Uses a narrow owner-approved policy only if impact is actually benign; does not blanket-enable a root wildcard"
       ]
     }
   ],

@@ -1,10 +1,27 @@
+# Generated dependencies and build outputs
+node_modules/
+.icp/
+dist/
+*.wasm
+.mops/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+runtime/
+work/
+
+# Local credentials and environment files
 *.pem
 *.key
+*.p12
+*.pfx
+*.keystore
 .env
 .env.*
-.icp/
-node_modules/
-work/
-attachment-merge-review.json
-PR_DESCRIPTION.md
+identity/
+identities/
+
+# Local machine and review artifacts
 .DS_Store
+attachment-merge-review.json

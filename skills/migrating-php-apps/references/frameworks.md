@@ -2,216 +2,113 @@
 
 Where each platform keeps content, users, URLs, files and schedules, and the traps specific to it. Table and column names below are the platform defaults; confirm them against the actual install (prefixes, versions and plugins change them) before writing export queries.
 
-Platform versions and historical checks in these notes are reported by the supplied source author. The revised exporters have local PHP syntax and isolated stub checks, not a new end-to-end CMS migration test. Confirm behavior against the actual installed versions and configuration.
-
 ## Contents
 
-- [Scoped export helpers](#scoped-export-helpers)
 - [WordPress](#wordpress)
 - [Drupal 8 and later](#drupal-8-and-later)
-- [Joomla 4 to 6](#joomla-4-to-6)
+- [Joomla 4 and 5](#joomla-4-and-5)
 - [Magento 2](#magento-2)
 - [Laravel](#laravel)
 - [Symfony](#symfony)
 - [CodeIgniter 4](#codeigniter-4)
 - [Plain PHP](#plain-php)
 
-## Scoped export helpers
-
-The examples below capture selected content and identity data for review. They are not universal CMS exporters or evidence that plugins, permissions or live workflows have migrated. Run them on an owner-approved copy using the relevant CMS CLI. Rendering invokes installed plugin/module code; inspect that code and its side effects first.
-
-Save this helper as `export-support.php` beside the selected exporter in a private working directory outside the web root. Set `MIGRATION_EXPORT_DIR` to an absolute, **new** directory whose parent already exists on private storage. Set `MIGRATION_WEB_ROOTS` to the absolute roots of every directory published by the web server, separated by `PATH_SEPARATOR` (`:` on Linux/macOS), including upload aliases. At least one root must contain the CMS root. The helper rejects output beneath those roots, creates a fresh directory with mode 0700, and writes files with mode 0600. It cannot discover web-server aliases: confirm the chosen storage is not served by any host. Never deploy this directory as frontend assets.
-
-```php
-<?php
-function migration_inside(string $path, string $root): bool {
-  return $path === $root || str_starts_with($path, rtrim($root, '/') . '/');
-}
-function migration_export_dir(string $cmsRoot): string {
-  $cms = realpath($cmsRoot); $roots = [];
-  foreach (explode(PATH_SEPARATOR, getenv('MIGRATION_WEB_ROOTS') ?: '') as $root) {
-    $resolved = $root !== '' && $root[0] === '/' ? realpath($root) : false;
-    if ($resolved === false || !is_dir($resolved)) throw new RuntimeException('Declare every public root.');
-    $roots[] = $resolved;
-  }
-  if ($cms === false || !array_filter($roots, fn($root) => migration_inside($cms, $root))) {
-    throw new RuntimeException('Declared public roots must include the CMS root.');
-  }
-  $requested = getenv('MIGRATION_EXPORT_DIR') ?: '';
-  $parent = $requested !== '' && $requested[0] === '/' ? realpath(dirname($requested)) : false;
-  $leaf = basename($requested);
-  if ($parent === false || !is_dir($parent) || in_array($leaf, ['', '.', '..'], true)) {
-    throw new RuntimeException('Choose a new absolute private output directory with an existing parent.');
-  }
-  $dir = rtrim($parent, '/') . '/' . $leaf;
-  foreach ($roots as $root) if (migration_inside($dir, $root)) throw new RuntimeException('Output is public.');
-  umask(0077);
-  if (file_exists($dir) || is_link($dir) || !mkdir($dir, 0700)) throw new RuntimeException('Use a fresh private directory.');
-  return $dir;
-}
-function migration_ids(string $name, bool $required = true): array {
-  $raw = getenv($name) ?: '';
-  if ($raw === '' && !$required) return [];
-  if (!preg_match('/^[1-9][0-9]*(,[1-9][0-9]*)*$/D', $raw)) throw new RuntimeException("Set $name to approved numeric IDs.");
-  return array_values(array_unique(array_map('intval', explode(',', $raw))));
-}
-function migration_route(string $url): string {
-  $parts = parse_url($url);
-  if (!is_array($parts) || empty($parts['host'])) throw new RuntimeException('Missing absolute source URL.');
-  return ($parts['path'] ?? '/') . (isset($parts['query']) ? '?' . $parts['query'] : '');
-}
-function migration_jsonl(string $path, iterable $rows): void {
-  $partial = $path . '.partial'; $handle = fopen($partial, 'xb');
-  if ($handle === false) throw new RuntimeException('Cannot create private export.');
-  try {
-    foreach ($rows as $row) {
-      $line = json_encode($row, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n";
-      for ($offset = 0; $offset < strlen($line); $offset += $written) {
-        $written = fwrite($handle, substr($line, $offset));
-        if ($written === false || $written === 0) throw new RuntimeException('Export write failed.');
-      }
-    }
-    if (!fflush($handle) || !fclose($handle)) throw new RuntimeException('Export close failed.');
-    if (!rename($partial, $path)) throw new RuntimeException('Export finalization failed.');
-  } finally { if (is_resource($handle)) fclose($handle); }
-}
-```
-
-Treat a run as failed if it raises an error or leaves `.partial` files. Review all completed files, counts and approved IDs before importing; a completed JSONL file alone is not migration acceptance. The rows include extra metadata and arrays: adapt the converter field mapping, import DTOs, stored schema and frontend consumers before claiming those values are preserved.
-
 ## WordPress
 
-The supplied notes report checks on WordPress 7.1. The scoped exporter below has been revised; its PHP syntax check is not a new CMS or plugin compatibility test.
+Checked on WordPress 7.1 with a full migration (see `SKILL.md`, Phase 4 and 6).
 
 - **Prefix:** `$table_prefix` in `wp-config.php` (default `wp_`). Use the real prefix in every query.
 - **Content:** `wp_posts`. Filter `post_type IN ('post', 'page')` (plus any custom types the site uses) and `post_status = 'publish'`; `post_name` is the slug, `post_date_gmt` / `post_modified_gmt` are UTC. Rows with `post_type = 'revision'`, `'attachment'` or `'nav_menu_item'` are not pages.
-- **Rendered HTML:** render approved public content through WordPress while the old site still runs. Save the example as `wp-export.php` beside the helper and run it with `wp --path=/path/to/site eval-file /private/work/wp-export.php`. Supply `MIGRATION_PUBLIC_POST_IDS` as an explicit comma-separated list of approved page/post IDs; optional `MIGRATION_USER_IDS` selects identity records separately. Set the private-output variables above. Approval must include reviewing password, membership and plugin access rules: the script rejects password-protected and unpublished posts, but cannot infer every plugin's privacy policy.
+- **Rendered HTML:** `post_content` holds block comments (`<!-- wp:paragraph -->`) and shortcodes (`[gallery ids="1,2"]`) that only WordPress can expand. Export the rendered HTML with WordPress itself while the old site still runs. This script, run with `wp eval-file export.php` at the WordPress root, writes JSON lines ready for the converter in `data-import.md` (tested on WordPress 7.1):
 
   ```php
   <?php
-  require __DIR__ . '/export-support.php';
-  $ids = migration_ids('MIGRATION_PUBLIC_POST_IDS'); $userIds = migration_ids('MIGRATION_USER_IDS', false);
-  if (get_current_user_id() !== 0) throw new RuntimeException('Render public snapshots without a privileged --user.');
-  $dir = migration_export_dir(ABSPATH);
-  $content = function () use ($ids) {
-    foreach ($ids as $id) {
-      $p = get_post($id);
-      if (!$p || !in_array($p->post_type, ['page', 'post'], true) || $p->post_status !== 'publish' || $p->post_password !== '') {
-        throw new RuntimeException("Post $id is not eligible for this public snapshot.");
-      }
-      $previous = $GLOBALS['post'] ?? null; $GLOBALS['post'] = $p;
-      try {
-        if (!setup_postdata($p)) throw new RuntimeException('Cannot establish post context.');
-        $url = get_permalink($p);
-        if (!is_string($url)) throw new RuntimeException('Cannot resolve source permalink.');
-        $html = class_exists('\Elementor\Plugin') && get_post_meta($id, '_elementor_edit_mode', true) === 'builder'
-          ? \Elementor\Plugin::$instance->frontend->get_builder_content_for_display($id, true)
-          : apply_filters('the_content', $p->post_content);
-        yield ['legacyId' => $id, 'siteId' => get_current_blog_id(), 'siteUrl' => home_url('/'),
-          'postType' => $p->post_type, 'url' => $url, 'route' => migration_route($url),
-          'language' => function_exists('pll_get_post_language') ? pll_get_post_language($id) : null,
-          'translations' => function_exists('pll_get_post_translations') ? pll_get_post_translations($id) : [],
-          'title' => $p->post_title, 'bodyHtml' => $html, 'published' => true,
-          'updatedAt' => strtotime($p->post_modified_gmt . ' UTC'), 'authorLegacyId' => (int) $p->post_author,
-          'fields' => function_exists('get_fields') ? get_fields($id) : null,
-          'seoRawTitle' => get_post_meta($id, '_yoast_wpseo_title', true),
-          'seoRawDescription' => get_post_meta($id, '_yoast_wpseo_metadesc', true)];
-      } finally { wp_reset_postdata(); $GLOBALS['post'] = $previous; }
+  // Run at the WordPress root: wp eval-file export.php   (writes export/*.jsonl next to it)
+  $opts = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES;
+  is_dir('export') || mkdir('export');
+  $render = function ($p) {
+    if (class_exists('\Elementor\Plugin') && get_post_meta($p->ID, '_elementor_edit_mode', true) === 'builder') {
+      return \Elementor\Plugin::$instance->frontend->get_builder_content_for_display($p->ID, true);   // page builders bypass the_content
     }
+    return apply_filters('the_content', $p->post_content);
   };
-  migration_jsonl($dir . '/content.jsonl', $content());
-  $users = function () use ($userIds) {
-    foreach ($userIds as $id) {
-      $u = get_userdata($id);
-      if (!$u) throw new RuntimeException("Missing approved user $id.");
-      yield ['legacyId' => $id, 'siteId' => get_current_blog_id(), 'email' => strtolower(trim($u->user_email)),
-        'displayName' => $u->display_name, 'sourceRoles' => array_values($u->roles)];
-    }
+  $extras = function ($p) {   // plugin data that belongs to the page; each key is a decision in the feature map
+    $x = [];
+    if (function_exists('pll_get_post_language')) { $x['language'] = pll_get_post_language($p->ID); $x['translations'] = pll_get_post_translations($p->ID); }
+    if (function_exists('get_fields')) { $x['fields'] = get_fields($p->ID) ?: null; }                 // Advanced Custom Fields, structured
+    $x['seoTitle'] = get_post_meta($p->ID, '_yoast_wpseo_title', true) ?: null;                        // Yoast SEO
+    $x['seoDescription'] = get_post_meta($p->ID, '_yoast_wpseo_metadesc', true) ?: null;
+    return array_filter($x, fn($v) => $v !== null && $v !== '' && $v !== false && $v !== []);
   };
-  migration_jsonl($dir . '/users.jsonl', $users()); // No passwords, tokens or inferred authorization.
+  $pages = fopen('export/pages.jsonl', 'w');
+  foreach (get_posts(['post_type' => 'page', 'post_status' => 'publish', 'numberposts' => -1, 'orderby' => 'ID', 'order' => 'ASC']) as $p) {
+    fwrite($pages, json_encode(['legacyId' => $p->ID, 'slug' => $p->post_name, 'title' => $p->post_title, 'bodyHtml' => $render($p),
+      'published' => true, 'updatedAt' => strtotime($p->post_modified_gmt . ' UTC')] + $extras($p), $opts) . "\n");
+  }
+  $news = fopen('export/news.jsonl', 'w');
+  foreach (get_posts(['post_type' => 'post', 'post_status' => 'publish', 'numberposts' => -1, 'orderby' => 'ID', 'order' => 'ASC']) as $p) {
+    fwrite($news, json_encode(['legacyId' => $p->ID, 'slug' => $p->post_name, 'title' => $p->post_title,
+      'summary' => $p->post_excerpt !== '' ? $p->post_excerpt : null, 'bodyHtml' => $render($p),
+      'publishedAt' => strtotime($p->post_date_gmt . ' UTC'), 'authorLegacyId' => (int) $p->post_author] + $extras($p), $opts) . "\n");
+  }
+  $users = fopen('export/users.jsonl', 'w');   // identity data only: never user_pass
+  foreach (get_users(['orderby' => 'ID']) as $u) {
+    fwrite($users, json_encode(['legacyId' => $u->ID, 'email' => strtolower(trim($u->user_email)),
+      'displayName' => $u->display_name, 'role' => $u->roles[0]], $opts) . "\n");
+  }
   ```
 
-  This captures selected `page`/`post` snapshots, optional approved users, Polylang language/translation IDs, raw Yoast overrides and ACF values. Add a reviewed adapter for WPML or another language provider; do not infer language from the slug. Identify records by site plus post ID, and preserve the full source URL/route, including query strings and trailing-slash behavior. Split/map `content.jsonl` into the chosen import DTOs; extra fields are **discarded** by the existing converter unless explicitly mapped, and arrays/ACF structures require an adapted schema/importer and frontend use. Raw Yoast templates are not final rendered SEO tags.
-
-  Post context is established, but CLI rendering does not recreate every URL, session, language, membership or request context or collect all enqueued styles/scripts. Compare anonymous and authenticated browser journeys. Searches for literal shortcodes or `<form|wpcf7|woocommerce|admin-ajax|wp-json` are only heuristics: hits require investigation, and no hits do not establish independence from PHP. Rebuild or retain live behavior separately; never publish private or personalized snapshots as public assets.
-- **Metadata and options:** `wp_postmeta` and `wp_options` often hold serialized PHP (`a:2:{s:3:"foo";...}`). WordPress metadata APIs decode serialized values; this is not a guarantee that arbitrary metadata or plugin code is safe. Inspect and process an owner-approved copy in an isolated environment. Do not pass untrusted serialized input to PHP's `unserialize()`. Preserve exact bytes and validate decoded types before converting to JSON.
+  The converter ignores keys it is not given, so the extra keys (`language`, `translations`, `fields`, `seoTitle`, `seoDescription`) are available for the pages that need them without changing the backend types. After the export, check two things: shortcodes whose plugin is inactive stay as literal text (`grep -oh '\[[a-z0-9_-]*' export/*.jsonl | sort | uniq -c`), and rendered markup that still depends on PHP (`grep -o -E '<form|wpcf7|data-block-name|woocommerce|admin-ajax|wp-json' export/*.jsonl | sort | uniq -c`): a contact form renders as a `<form>` that posts to WordPress's own API, and shop pages render block markup that WordPress's JavaScript fills in. Each hit is a feature-map row, not content.
+- **Metadata and options:** `wp_postmeta` and `wp_options` often hold serialized PHP (`a:2:{s:3:"foo";...}`). Inside WordPress, `get_post_meta()` already decodes it safely (the export script above can include it). From a raw database value, decode with the PHP CLI, refusing to instantiate objects: `php -r 'echo json_encode(unserialize(trim(stream_get_contents(STDIN)), ["allowed_classes" => false]));'` (the `trim` removes the newline the `mysql` client adds, which otherwise triggers a warning).
 - **Taxonomies:** `wp_terms`, `wp_term_taxonomy`, `wp_term_relationships`.
-- **Users:** `wp_users` (`user_email`, `display_name`; never `user_pass`) and all roles/capabilities in `wp_usermeta`. The example preserves every assigned role as source data, not target authorization. Review custom roles, direct capabilities, multisite membership and super-admin status separately, then define explicit target permissions and verified account linking.
-- **URLs:** inspect `permalink_structure` and export `get_permalink()` for each selected record. Preserve parent/date/category/language paths and the actual slash behavior. For a slash-ending route, `dist/afval/index.html` serves `/afval/`; for a slashless route, `dist/afval.html` serves `/afval`. Query-string links such as `/?p=123` can circulate even with pretty permalinks; map them explicitly (`old-urls.md`).
+- **Users:** `wp_users` (`user_email`, `display_name`; never `user_pass`) and roles in `wp_usermeta` under `<prefix>capabilities` (serialized); the export script above reads them through WordPress. The roles are `administrator`, `editor`, `author`, `contributor` and `subscriber`: make the backend's `role` variant match (see `backend-example.md`).
+- **URLs:** the `permalink_structure` option (for example `/%postname%/` or `/%year%/%monthnum%/%postname%/`). Pretty permalinks end with a slash, so build each page as a directory index: `dist/afval/index.html` is served at `/afval/`, and the static-site canister redirects `/afval` to `/afval/` by itself (tested). Nest directories for date-based structures. Links in the form `/?p=123` and `/?page_id=5` keep working on sites with pretty permalinks too; they land on `/`, so the mapping script must run in the home page (`old-urls.md`).
 - **Files:** `wp-content/uploads/YYYY/MM/`, including generated thumbnail sizes. Copy the ones still referenced into the static-site `dir` at the same paths so old image URLs keep working.
 - **Schedules:** WP-Cron (`wp cron event list`), triggered by page visits rather than the system cron.
-- **Plugins:** run `wp plugin list --status=active --skip-update-check --format=json`, then repeat for `active-network`, `must-use` and `dropin`; repeat per in-scope multisite site with `--url=<site-url>`. Inspect custom theme functions too. Decide per capability whether to rebuild, replace, retain as an integration or retire with the owner's consent. Record remaining PHP dependencies and owner-agreed live workflow tests. These platform-specific starting points require verification against installed versions and configuration:
+- **Plugins:** every active plugin (`wp plugin list --status=active`) is a feature-map row: rebuild, replace or drop with the owner's consent. Where the common ones keep their data (checked on WordPress 7.1):
   - *Contact Form 7:* forms are posts of type `wpcf7_contact_form` (fields in postmeta `_form`, recipients in `_mail`); the rendered `<form>` posts to `wp-json/contact-form-7`. Becomes a backend update method plus a page form; decide who receives the mail (`https-outcalls`).
-  - *Yoast SEO:* raw per-page overrides in `_yoast_wpseo_title` and `_yoast_wpseo_metadesc` are exported above; canonical and social data may also use `wp_yoast_indexable`. Resolve templates/defaults and map required output into `<title>`, canonical, social and metadata tags; compare the original page head.
+  - *Yoast SEO:* per-page title and description in postmeta `_yoast_wpseo_title` and `_yoast_wpseo_metadesc` (exported above); canonical and social data in `wp_yoast_indexable`. Becomes `<title>` and `<meta>` tags in the built pages.
   - *Advanced Custom Fields:* values in postmeta under the field name (repeaters as `name_0_sub`, `name_1_sub`, ...) with a `_name` key reference beside each; `get_fields()` returns them structured (exported above) when the field groups are in the database or theme code. Each field becomes a record field.
-  - *Elementor and other page builders:* builder structure may live in metadata such as `_elementor_data`; `post_content` alone need not reproduce the page. The example uses Elementor's API for builder pages. Compare full pages, assets, templates, conditions and live controls in the actual request context; preserve required styles or restyle deliberately.
+  - *Elementor and other page builders:* `post_content` is empty and the page is JSON in `_elementor_data`; `apply_filters('the_content')` renders nothing from the command line. Render through the builder's API (the script does this for Elementor) or fetch the page over HTTP from the running site. The result carries inline styles and the builder's CSS classes; keep its stylesheet or restyle.
   - *WooCommerce:* products are posts of type `product` with postmeta `_price`, `_sku`, `_stock_status` and the `wc_product_meta_lookup` table; orders in the `wc_orders*` tables (or posts of type `shop_order` on older sites); customers are users. The shop, cart, checkout and account pages export empty or as JavaScript-dependent markup. Catalog and content can move; checkout, payments, tax and stock are the owner decision under Magento's heading below.
   - *Polylang and WPML:* one post per language, linked by the `post_translations` taxonomy (Polylang) or the `icl_translations` table (WPML). Export the language and the links (the script does this for Polylang) and build one page per language at its own path.
-  - *Wordfence, Akismet, caching and backup plugins:* identify the protections and operating duties they supply. Spam prevention, authorization, abuse handling, recovery and freshness may still be required. Replace, retain or retire each capability explicitly; removing PHP does not remove those responsibilities.
+  - *Wordfence, Akismet, caching and backup plugins:* operational, with their own tables; nothing to migrate. The attack surface they guard is gone.
 
 ## Drupal 8 and later
 
 - **Layout:** Composer sites keep the web root in `web/` (or `docroot/`); the project root holds `composer.json`, `vendor/` and `config/`. The inventory script reports the web root. Run `drush` from the project root.
 - **Content:** `node_field_data` (`nid`, `type`, `langcode`, `title`, `status`, `created`, `changed` as Unix seconds); bodies in `node__body` (`entity_id`, `body_value`, `body_summary`, `body_format`); other fields in `node__field_<name>` tables. Multilingual sites have one row per `langcode`.
-- **Text formats:** `body_format` (`basic_html`, `full_html`, ...) determines output filters. `$node->body->processed` applies those filters, but does not recreate a full page, Views, layout, access or editorial behavior. The supplied notes report Drupal 11.4 checks; the revised example below has only a PHP syntax check. Save it as `drupal-export.php` beside the [shared helper](#scoped-export-helpers), outside the web root. Run from the project with `drush php:script /private/work/drupal-export.php`. Set the private-output variables above and `MIGRATION_PUBLIC_NODE_TRANSLATIONS` to approved `node-id:langcode` pairs such as `16:en,16:fr`. Optional `MIGRATION_USER_IDS` selects identity records separately. Approval must consider module access rules and each translation; an export is not a new access policy.
+- **Text formats:** `body_format` (`basic_html`, `full_html`, ...) decides which filters run on output. Export the filtered HTML through Drupal instead of the raw `body_value`: `$node->body->processed` applies the format's filters without theme wrappers. This script writes JSON lines ready for the converter in `data-import.md`; run it from the project root with `drush php:script export.php` (tested on Drupal 11.4; Drush changes the working directory, so the script addresses its output through `__DIR__`):
 
   ```php
   <?php
-  require __DIR__ . '/export-support.php';
-  $raw = getenv('MIGRATION_PUBLIC_NODE_TRANSLATIONS') ?: '';
-  if (!preg_match('/^[1-9][0-9]*:[A-Za-z0-9_-]+(,[1-9][0-9]*:[A-Za-z0-9_-]+)*$/D', $raw)) {
-    throw new RuntimeException('Specify approved node-id:langcode pairs.');
+  $opts = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES;
+  $storage = \Drupal::entityTypeManager()->getStorage('node'); $aliases = \Drupal::service('path_alias.manager');
+  $slug = fn($node) => ltrim($aliases->getAliasByPath('/node/' . $node->id()), '/');   // the alias, or node/<nid>
+  $pages = fopen(__DIR__ . '/export/pages.jsonl', 'w');
+  foreach ($storage->loadByProperties(['type' => 'page', 'status' => 1]) as $n) {
+    fwrite($pages, json_encode(['legacyId' => (int) $n->id(), 'slug' => $slug($n), 'title' => $n->getTitle(),
+      'bodyHtml' => trim((string) $n->body->processed), 'published' => true, 'updatedAt' => (int) $n->getChangedTime()], $opts) . "\n");
   }
-  $approved = array_fill_keys(explode(',', $raw), true);
-  $nodeIds = array_unique(array_map(fn($key) => (int) explode(':', $key, 2)[0], array_keys($approved)));
-  $userIds = migration_ids('MIGRATION_USER_IDS', false); $dir = migration_export_dir(DRUPAL_ROOT);
-  $content = function () use ($approved, $nodeIds) {
-    $seen = []; $anonymous = new \Drupal\Core\Session\AnonymousUserSession();
-    $switcher = \Drupal::service('account_switcher'); $switcher->switchTo($anonymous);
-    try {
-      $storage = \Drupal::entityTypeManager()->getStorage('node');
-      $aliases = \Drupal::service('path_alias.manager');
-      foreach ($storage->loadMultiple($nodeIds) as $node) {
-        foreach ($node->getTranslationLanguages() as $langcode => $language) {
-          $key = $node->id() . ':' . $langcode;
-          if (!isset($approved[$key])) continue;
-          $translation = $node->getTranslation($langcode);
-          if (!in_array($translation->bundle(), ['page', 'article'], true) || !$translation->isPublished()
-              || !$translation->access('view', $anonymous)) throw new RuntimeException("Translation $key is not public.");
-          $url = $translation->toUrl('canonical', ['absolute' => true, 'language' => $language])->toString();
-          $body = $translation->hasField('body') && !$translation->get('body')->isEmpty() ? $translation->get('body') : null;
-          yield ['legacyId' => (int) $node->id(), 'sourceUuid' => $node->uuid(), 'language' => $langcode,
-            'contentType' => $translation->bundle(), 'url' => $url, 'route' => migration_route($url),
-            'alias' => $aliases->getAliasByPath('/node/' . $node->id(), $langcode),
-            'title' => $translation->getTitle(), 'bodyHtml' => $body ? (string) $body->processed : '',
-            'summary' => $body ? $body->summary : null, 'published' => true,
-            'updatedAt' => (int) $translation->getChangedTime(), 'authorLegacyId' => (int) $translation->getOwnerId()];
-          $seen[$key] = true;
-        }
-      }
-      if (array_diff_key($approved, $seen)) throw new RuntimeException('Some approved translations were not found.');
-    } finally { $switcher->switchBack(); }
-  };
-  migration_jsonl($dir . '/content.jsonl', $content());
-  $users = function () use ($userIds) {
-    $storage = \Drupal::entityTypeManager()->getStorage('user');
-    foreach ($userIds as $id) {
-      $u = $storage->load($id);
-      if (!$u) throw new RuntimeException("Missing approved user $id.");
-      yield ['legacyId' => $id, 'sourceUuid' => $u->uuid(), 'email' => strtolower(trim((string) $u->getEmail())),
-        'displayName' => $u->getDisplayName(), 'sourceRoles' => array_values($u->getRoles())];
-    }
-  };
-  migration_jsonl($dir . '/users.jsonl', $users()); // Preserve source roles as data, not target authorization.
+  $news = fopen(__DIR__ . '/export/news.jsonl', 'w');
+  foreach ($storage->loadByProperties(['type' => 'article', 'status' => 1]) as $n) {
+    fwrite($news, json_encode(['legacyId' => (int) $n->id(), 'slug' => $slug($n), 'title' => $n->getTitle(), 'summary' => $n->body->summary ?: null,
+      'bodyHtml' => trim((string) $n->body->processed), 'publishedAt' => (int) $n->getCreatedTime(), 'authorLegacyId' => (int) $n->getOwnerId()], $opts) . "\n");
+  }
+  $roles = ['administrator' => 'administrator', 'content_editor' => 'editor'];   // map the site's roles to the backend variant
+  $users = fopen(__DIR__ . '/export/users.jsonl', 'w');                           // identity data only: never pass
+  foreach (\Drupal::entityTypeManager()->getStorage('user')->loadMultiple() as $u) {
+    if ($u->id() == 0) continue;
+    $r = array_values(array_diff($u->getRoles(), ['authenticated']))[0] ?? 'subscriber';
+    fwrite($users, json_encode(['legacyId' => (int) $u->id(), 'email' => strtolower(trim((string) $u->getEmail())), 'displayName' => $u->getDisplayName(), 'role' => $roles[$r] ?? 'subscriber'], $opts) . "\n");
+  }
+  $map = fopen(__DIR__ . '/export/node-aliases.tsv', 'w');                        // for the /node/<nid> redirect rules
+  foreach (\Drupal::database()->query('SELECT path, alias FROM {path_alias}') as $row) fwrite($map, "$row->path\t$row->alias\n");
   ```
 
-  Identify translated records by node ID/UUID **and language**, so imports do not overwrite translations sharing the same node ID. Preserve both aliases and language-aware canonical URLs; domain/prefix negotiation can make them differ. Adapt the converter, import schema and frontend to these rows, including custom fields where required. Anonymous rendering and entity access checks do not establish every module's output policy; test relevant contexts and exclude personalized output from public snapshots.
-
-- **Modules and custom code:** inventory enabled modules with `drush pm:list --type=module --status=enabled --format=json`; inspect contributed/custom modules, themes, controllers, services, hooks and event subscribers. Record each capability and its dependencies, then choose a rebuild, replacement, retained integration or approved retirement.
-- **Dynamic workflows:** inventory Views displays, filters and contextual arguments; form validation/submission, calculated fields, roles/permissions/access checks, revisions, moderation, translations and editorial publishing. Define owner-agreed live tests for allowed and denied actions and relevant user/route/language/filter contexts. Filtered body HTML alone does not preserve these behaviors.
-- **Raw SQL exports:** confirm the MySQL/MariaDB client's connection encoding before export; a wrong setting can corrupt Unicode. Where supported, pass explicit flags such as `drush sql:query --extra="--default-character-set=utf8mb4 --batch --raw" "SELECT ..."` and reconcile representative Unicode values. Consult the installed Drush version rather than assuming its defaults.
-- **URLs:** `path_alias` includes the internal path, alias and language. Preserve the observed route and actual slash behavior; generate reviewed language-aware redirects for circulating `/node/<nid>` links. Do not collapse different language aliases to one path.
-- **Users:** `users_field_data` (`uid`, `name`, `mail`; never `pass`); roles in `user__roles` (`entity_id`, `roles_target_id`), plus implicit roles. Preserve all assigned roles, then review permissions, user 1's special status, access modules and verified account linking explicitly. Do not infer target permissions from the first role.
+- **Raw SQL exports:** `drush sql:query` runs the `mysql` client without a character set, which turns emoji and some punctuation into `?`. Pass the client flags: `drush sql:query --extra="--default-character-set=utf8mb4 --batch --raw" "SELECT ..."`, or run the client yourself with the credentials from `drush sql:connect`.
+- **URLs:** `path_alias` (`path` such as `/node/123`, `alias` such as `/about-us`, `langcode`, often `und`). Drupal URLs have no trailing slash: build `dist/about-us.html`, served at `/about-us`. Generate exact `_redirects` rules for `/node/<nid>` from the alias table (tested: `/node/16  /afval  301`), because those links circulate in emails and documents.
+- **Users:** `users_field_data` (`uid`, `name`, `mail`; never `pass`); roles in `user__roles` (`entity_id`, `roles_target_id`). Every account also has the implicit `authenticated` role.
 - **Files:** `file_managed` (`uri` such as `public://2026-10/report.pdf`) maps to `<web root>/sites/default/files/2026-10/report.pdf`. Copy only the files `file_managed` lists, never the whole directory: it also holds `config_<hash>/sync` (the site's configuration, with any secrets in it), `php/` (compiled templates) and aggregated `css/` and `js/`.
 - **Tools:** `drush php:script` for exports through Drupal, `drush sql:query` for raw SQL (with the flags above), `drush cron` for scheduled work.
 

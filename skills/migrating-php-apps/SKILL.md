@@ -1,108 +1,220 @@
 ---
 name: migrating-php-apps
-description: Rebuild an existing PHP, WordPress, Drupal or other PHP application with a Motoko backend on the Internet Computer. Assess the actual application, preserve agreed behavior and data, and validate the migration. Use for a PHP predecessor, not a new Motoko application.
+description: "Move an existing PHP website or web app to the Internet Computer with a Motoko backend: WordPress and Drupal sites, Joomla and Magento stores, Laravel, Symfony or CodeIgniter apps, and plain PHP on MySQL or PostgreSQL. Covers the read-only inventory and the plan the user approves, rebuilding pages as a static-site frontend or keeping an existing frontend host, porting PHP logic to Motoko, exporting the database and batch-importing it into actor state, keeping old URLs working, moving sign-in to Internet Identity, and cutting over to the existing domain with evidence that it works. Use when the user wants to migrate, port or rebuild a PHP or LAMP site on ICP, move it to Motoko, or get off PHP. Do NOT use for a new Motoko app with no PHP predecessor (use writing-motoko) or for changing a deployed canister's state shape (use migrating-motoko-actors)."
 license: Apache-2.0
+compatibility: "icp-cli >= 1.0.0, mops >= 3.0.0, moc >= 1.12.0, core >= 2.6.0, Node.js >= 22, Python 3; read access to the PHP source, a database export and the upload directories"
 metadata:
-  title: Migrating PHP Apps to Motoko
+  title: "Migrating PHP Apps to Motoko"
   category: Core
-  compatibility: icp-cli >= 1.7.0, mops >= 3.0.0, moc >= 1.12.0, core >= 2.6.0, Node.js >= 22, Python 3; access to the source and representative application data
 ---
 
 # Migrating PHP Apps to Motoko
 
-Rebuild the agreed behavior of an existing PHP service in Motoko. Preserve its required data, URLs and user journeys. A successful migration includes working operations after import: editing, publishing, forms, calculations, permissions, jobs and integrations where the application uses them.
+## What This Is
 
-PHP plugins and Drupal modules do not run unchanged in Motoko. For each required capability, choose a rebuild, replacement, retained integration or owner-approved retirement. A database import or static export alone does not establish compatibility.
+A tested workflow for taking a running PHP site or application, with its data, users and URLs, to the Internet Computer. The end state:
 
-## Use references selectively
+```text
+Browser ── HTTPS ──> HTTP gateway ──> frontend canister (@dfinity/static-site, certified-assets)
+   │                                   built HTML/CSS/JS, public media, _redirects, _headers
+   └── signed canister calls (Candid) ──> backend canister (Motoko)
+                                         data, business rules, import endpoints
+Sign-in: Internet Identity    Scheduled jobs: timers    Outbound APIs: HTTPS outcalls
+Domain: custom-domains        No PHP runtime, web server, database server or OS left to patch
+```
 
-Use the application's source, configuration, schema and observed behavior as the evidence. Existing tooling or an equivalent read-only inventory is sufficient; do not run an additional script solely because this skill includes one. Confirm version-sensitive commands against the installed tools.
+Why this shape: the static-site canister certifies every response ahead of time, so it serves a **finite set of files**. PHP renders per request; on the IC, pages are built ahead of time or rendered in the browser from backend data. Do not serve PHP templates from the Motoko canister's `http_request` as query responses: gateways verify those against certified data, and the certification library is Rust-only. Keep Motoko a typed API. For the few routes that must render per request, and for certification opt-outs, read [`references/delivery.md`](references/delivery.md) before deciding.
 
-Read only the relevant references:
+This skill orchestrates the migration. Load these skills for the details it delegates: `writing-motoko` (all Motoko code), `migrating-motoko-actors` (state changes after go-live), `mops-cli`, `icp-cli`, `static-site`, `internet-identity`, `canister-security`, `https-outcalls`, `custom-domains`, `cycles-management`; and when relevant `multi-canister` (data beyond one canister), `vetkeys` / `encrypted-maps` (data that must stay confidential), `deploy-to-cloud-engine` and `cloud-engine-canisters` (organization-owned capacity).
 
-| When needed | Reference |
-|-------------|-----------|
-| Discovering an unfamiliar codebase | [Optional inventory helper](references/inventory.md) |
-| Platform-specific structures or extension behavior | [Platform notes](references/frameworks.md); read the relevant platform section |
-| Choosing HTTP delivery or certification for dynamic pages | [Dynamic delivery](references/delivery.md) |
-| Designing an idempotent content import | [Import/read backend example](references/backend-example.md); adapt its schema and authorization |
-| Exporting SQL data and converting import batches | [Data import](references/data-import.md) |
-| Preserving renamed, PHP or query-string URLs | [Old URLs](references/old-urls.md) |
+## Prerequisites
 
-Load current ICP guidance from https://skills.internetcomputer.org/llms.txt when its topic becomes relevant: Motoko and persistence, CLI/deployment, static-site delivery, identity, canister security, external calls, domains, funding or cloud engines. These references provide specific examples and operational constraints; they are not a requirement to load every document before starting.
+- The PHP source (repository or a copy of the web root), a **read-only** database account or a recent export, and a copy of the upload directories.
+- `icp-cli`, `ic-wasm`, `mops` (see `icp-cli` and `mops-cli`), Node.js >= 22, Python 3, and the `mysql`/`mariadb` or `psql` client.
+- Production database write access is never needed. Never copy secret values (database passwords, SMTP or API keys) into the new code, the canister, batch files, reports or chat.
 
-## Working constraints
+## Ground Rules
 
-- Begin with a read-only inventory and an owner-approved plan. Keep the existing service patched and available while building from copies.
-- Honor the owner's existing authorization. Treat a production write freeze, traffic/DNS cutover and decommissioning as separate decisions when they are outside that authorization.
-- Keep secret values and private exports out of code, reports and chat. Assess personal data and operator confidentiality before importing it.
-- Track required features, gaps, the proposed destination and observable acceptance evidence. Do not silently replace working behavior with a screenshot, mock or stub.
-- A working build or a successful example does not prove a particular site's plugins or workflows migrated correctly.
+1. **The old site keeps running, patched, until cutover.** Work from copies. Nothing in the old system changes before the write freeze in Phase 6.
+2. **Track every feature in a feature map** and update it as you go. One row per route, form, job, integration, role and table:
 
-## 1. Inventory the actual application
+   | Feature | Where in PHP | New home | Status | Evidence |
+   |---------|--------------|----------|--------|----------|
+   | News article page | `news.php`, `.htaccess` rule 1 | static page per item + `getNews` | tested | `/nieuws/12` → 200 locally |
 
-Identify the platform/version, routes, data model, files, users/roles, active extensions, custom code, scheduled work and external dependencies. Check deployment configuration and schema instead of assuming default table names.
+   Status moves `found → built → tested → data moved → verified live`. A feature without evidence is not done; a feature you cannot rebuild is a **listed gap**, never silently dropped.
+3. **Get the owner's sign-off on the plan (Phase 2)**, then work through reversible steps without asking again. Ask again before the write freeze, the DNS change and decommissioning; these are the irreversible ones.
+4. **"It builds" is a checkpoint, not the finish.** Done means the agreed features work at the live URL with migrated data, and the hand-over evidence below exists.
 
-For WordPress, include network-active and must-use plugins, drop-ins, theme functions, shortcodes, dynamic blocks and custom endpoints. For Drupal, include enabled/custom modules, Views, forms, access rules, configuration and editorial workflows. Use [platform notes](references/frameworks.md) where relevant.
+## Phase 1: Inventory
 
-Observe representative journeys and record their inputs, outputs and side effects. Include anonymous and authenticated users, privileged roles, validation failures, content changes and relevant language/site variants. Trace request-time calculations and extension hooks through the code; their results are not necessarily stored in the database.
+Run the read-only inventory script from [`references/inventory.md`](references/inventory.md) at the PHP project root:
 
-For each required capability record: source implementation and data, proposed new implementation, dependencies, current status and an acceptance check. Flag unavailable source, credentials, services or test data as evidence gaps rather than guessing.
+```bash
+bash php-inventory.sh > inventory.md
+```
 
-## 2. Agree the target and evidence
+It reports the platform (WordPress, Drupal, Joomla, Magento, Laravel, Symfony, CodeIgniter or plain PHP), entry points, `.htaccess` rewrite rules, which files use sessions, logins, forms, uploads, email, outbound HTTP, shell commands, image/PDF libraries and the database, plus SQL tables, scheduled jobs, upload directory sizes, and the **names** (never values) of configuration secrets.
 
-Choose the frontend host and rendering model to fit the application:
+Then collect what the script cannot see:
 
-- A certified static frontend can call a dynamic Motoko backend. Forms, calculations, search, editing and permissions can run through backend methods without rebuilding or upgrading the canister for each content change.
-- Pre-render content only when it meets freshness, personalization and indexing requirements. Rebuild/sync published assets when that is the chosen content workflow.
-- Use custom HTTP rendering when server-rendered responses or ordinary HTTP integrations require it. ICP supports dynamic HTTP and query-to-update delivery; see [dynamic delivery](references/delivery.md). A static-site recipe's file/routing limitations are not ICP-wide restrictions.
-- The frontend may remain on an existing host. Record the retained host, PHP components and external services as ongoing dependencies.
+- **Row counts and sizes**, for reconciliation and capacity planning (MySQL/MariaDB):
 
-Decide which extension capabilities will be rebuilt, replaced, retained or retired. Define editor/admin operations as well as public pages. Agree identity/account linking, data handling, operators/location, funding, continuity, reconciliation and rollback requirements.
+  ```sql
+  SELECT table_name, table_rows, ROUND((data_length + index_length) / 1048576, 1) AS mb
+  FROM information_schema.tables WHERE table_schema = DATABASE() ORDER BY mb DESC;
+  ```
 
-Approve scope, gaps and measurable acceptance criteria before implementation. A pilot with selected plugins demonstrates those scenarios, not universal WordPress or Drupal compatibility.
+  `table_rows` is an estimate for InnoDB; reconcile against `SELECT COUNT(*)`.
+- **The URLs that matter**: `sitemap.xml`, the CMS's URL/alias table (see [`references/frameworks.md`](references/frameworks.md)), and the most-requested paths from the access log: `awk '{print $7}' access.log | sort | uniq -c | sort -rn | head -2000` (common/combined log format).
+- **Logged-in and admin journeys**: a public URL never shows private logic, roles or data. Read the code for them.
 
-## 3. Build the agreed behavior
+For WordPress, Drupal, Joomla, Magento, Laravel and Symfony, read [`references/frameworks.md`](references/frameworks.md) now: where content, users, URLs and schedules live, and the platform-specific traps (serialized PHP values, EAV tables, shortcodes).
 
-Use the installed Motoko toolchain and current ICP guidance. The [backend example](references/backend-example.md) demonstrates content import and public reads; it is a starting point, not a full CMS or plugin system.
+## Phase 2: Plan What Moves Where
 
-- Keep import-interface row types independent from stored record types so a storage migration does not accidentally change the public Candid interface. Check both populated-state compatibility and interface compatibility; do not bypass a failing check to force an upgrade.
-- Preserve legacy identifiers and relationships deliberately. Use the actual key types: numeric, text/UUID or composite. The example's `Nat` keys are one schema choice.
-- Apply authorization to backend operations. In local tests, confirm the anonymous principal is not a canister controller before treating an anonymous rejection test as meaningful; use an explicitly chosen development identity. Never change existing controllers without authorization. Gate migration/import endpoints, cap batches and upsert idempotently. Paginate reads and respect request/response limits.
-- Reimplement calculations, form validation and state transitions with the intended transaction semantics. Account for partial failure across `await` boundaries, retries and external side effects.
-- Implement the actual editing/publishing and user workflows. Imported rendered HTML is a content snapshot; it does not recreate a plugin's behavior.
-- Map money, time, nulls, enums and indexes explicitly. Adapt the example rather than assuming every SQL table should become an identical map.
-- Use persistence/migration checks for the installed compiler. Preserve populated state across upgrades. Re-arm scheduled work as required and test duplicate execution.
-- Keep authentication and authorization distinct. Internet Identity is an available choice; retain or integrate required organizational sign-in when appropriate. Verified proof is required to link legacy accounts; persist the verified principal-to-legacy-account mapping and test access through it. Importing user records alone does not establish that mapping. Do not import password hashes for Internet Identity or embed authentication secrets in standard canister state.
-- Preserve important routes and response semantics. Read [old URLs](references/old-urls.md) only where the selected static-site recipe and legacy routes require it.
+| On the PHP site | On the Internet Computer | Watch out for |
+|-----------------|--------------------------|---------------|
+| Server-rendered pages and templates | Pages built ahead of time into the static-site `dir`, or a browser-rendered app that calls the backend | Content edited daily: render it in the browser from backend data, or rebuild and sync from CI with an `authorize`d syncer principal (`static-site`) |
+| Controllers, includes, plugins | `public` functions on a Motoko actor, `query` for reads | SQL joins and transactions become explicit code; one update call is all-or-nothing unless it `await`s |
+| Tables | One `Map` per table keyed by the legacy primary key, extra `Map`s as indexes | Heap is 4 GiB (wasm32) / 6 GiB (wasm64) per canister; beyond a few GiB of data, split canisters (`multi-canister`) |
+| Public media (images, PDFs) | Files in the static-site `dir`, uploaded on deploy | The static-site canister has no runtime upload API |
+| Runtime uploads (`$_FILES`) | Chunks of at most 1 MB per call into the backend, with per-user quotas | 2 MB request/response limit; unbounded storage is a denial-of-service vector (`canister-security`) |
+| `$_SESSION`, login forms, password hashes | Internet Identity and `caller` | Phase 5; never import password hashes |
+| CSRF tokens | Remove them for canister calls | Each call is signed by the session key the app holds; no ambient cookies are sent |
+| `cron` | Motoko timers (`mo:core/Timer`) armed by a controller-only method | Under the migration chain the actor body cannot have side effects; re-arm after each deploy |
+| `mail()`, SMTP, PHPMailer | HTTPS outcall to a transactional email API, non-replicated or with an idempotency key | Replicated POSTs are sent once per replica (`https-outcalls`); where the API key lives is an owner decision (security acceptance) |
+| `curl`, Guzzle | HTTPS outcalls | HTTPS and public endpoints only |
+| Incoming webhooks, payments | Owner decision: certified custom `http_request` or an external receiver | Flag as a decision; never stub it |
+| `exec`, GD/Imagick, PDF libraries | Build time, the browser, or an external service | No processes or native extensions in a canister |
+| Composer packages | Mops packages, or reimplement | Most have no Motoko equivalent; list each in the feature map |
+| Web server, PHP-FPM, OS | Nothing | |
 
-## 4. Move data where required
+**Choose the target with the owner:**
 
-Use an owner-approved copy/export, explicit schema mapping and bounded, repeatable imports. See [data import](references/data-import.md) for SQL/JSONL/Candid mechanics and escaping traps. Keep exports outside all served document roots. Preserve language, SEO and custom-field data through explicit schema/import/frontend mappings; collecting extra JSON keys does not migrate them.
+- **A. All on ICP (default):** frontend and backend canisters, the existing domain pointed at the frontend.
+- **B. Keep the existing frontend host:** the rebuilt static frontend stays on the owner's host or CDN and calls the Motoko backend on ICP (tested cross-origin). Without the `ic_env` cookie the canister id is page configuration; on mainnet pass no host or root key, locally take both from `icp network status --json`. The external host can change the JavaScript that talks to the backend, so it stays an integrity dependency, and it is the Internet Identity origin (Phase 5).
 
-Reconcile authoritative row counts, identifiers, relationships and file hashes. Include Unicode, nulls and other values the source actually contains. Record excluded or transformed data. Render through the original CMS when needed for a snapshot, while separately implementing its live behavior.
+**Choose where it runs:** `icp deploy -e ic` picks an application subnet. For data-residency rules, create the canisters with `--subnet <subnet-id>` on a subnet whose node locations fit (ICP dashboard); the flag only affects creation. For an organization's own cloud engine, `--engine <engine-name>` with `deploy-to-cloud-engine` and `cloud-engine-canisters` loaded (engines charge no cycles; never attach cycles there).
 
-## 5. Validate ongoing operations
+Present the feature map, the target and the gaps; get sign-off.
 
-Test the agreed journeys against the old and new implementations with representative data and roles. Include the actual installed extensions, not only a clean CMS installation.
+## Phase 3: Build
 
-| Capability present on the source site | Observable check |
-|--------------------------------------|------------------|
-| Dynamic block, shortcode or Drupal View | Change underlying content and verify fresh output, filters and permissions without a code upgrade |
-| Editorial workflow | Create/edit, preview, publish/unpublish and verify public visibility and denied roles |
-| Form or calculated result | Valid/invalid input, expected calculation, saved state and delivery/retry outcome |
-| Membership or private content | Correct account linking and access for allowed/denied users; no public cache leak |
-| Commerce or external webhook | Required pricing/state transitions, authentic requests, idempotency and failure handling |
-| Scheduled work | Due/not-due behavior, retries and no duplicate side effects after upgrade |
+Scaffold with `icp-cli` and `mops-cli`. Follow the file layout and rules of `writing-motoko` (`types.mo`, `lib/`, `mixins/`, `main.mo`, a `migrations/` chain). A complete, deployed and tested backend for a CMS-style site is in [`references/backend-example.md`](references/backend-example.md). Its `icp.yaml`:
 
-Use integrity-appropriate reads. Ordinary queries are served by a replica; use certified data or updates where a modified response would matter. Exercise the selected HTTP certification/update path through the intended gateway. Keep client HTML/scripts and signing/authorization flows protected; see [dynamic delivery](references/delivery.md).
+```yaml
+canisters:
+  - name: backend
+    recipe:
+      type: "@dfinity/motoko@v5.1.0"
+  - name: frontend
+    recipe:
+      type: "@dfinity/static-site@v0.4.0"
+      configuration:
+        dir: dist
+```
 
-Test a populated-state upgrade and the recovery procedure. Record failures and intentional differences. Do not claim a new end-to-end migration test from source inspection or compilation alone.
+Backend rules, each for a reason:
 
-## 6. Cut over and hand over
+1. **Key every imported table by its legacy primary key (`Nat`).** Old URLs, foreign keys and safe re-imports all depend on it.
+2. **Import methods are controller-only** (`caller.isController()`: the identity that deploys), **cap the batch size**, and **upsert**, so a failed run can simply be repeated.
+3. **Read methods paginate.** A response over 2 MB traps; never return a whole table.
+4. **Every public update method checks its caller** and rejects the anonymous principal where sign-in is required (`canister-security`).
+5. **Map column types deliberately:** money as `Nat` in minor units, never `Float`; time as `Int` nanoseconds since 1970 UTC (the unit of `Time.now()`); nullable columns as `?T`; `ENUM` as a variant.
+6. **Stable fields have no initializers**: the first migration file supplies them (`migrating-motoko-actors`). After go-live, every state change goes through that skill; keep import row types separate from stored types, or `icp deploy` refuses the changed method signature (see the example).
+7. **Scheduled jobs:** a controller-only `startJobs()` cancels the previous timer, then arms `Timer.recurringTimer<system>`; call it after every deploy.
 
-Deploy to the agreed network/subnet/engine and establish the correct funding model. Keep a preview alongside the old service, with appropriate access protection for private data.
+Frontend rules:
 
-With the required authorization, perform any write freeze and final export/import, reconcile, switch traffic/domain routing and verify the real origin. Check account linking, forms, editor/admin work, old URLs, headers, 404 behavior and external integrations. A code rollback and a data restore solve different problems; define how writes made during transition will be reconciled.
+1. **Keep old URLs by building pages at their old paths.** The canister serves `dist/nieuws/12.html` at `/nieuws/12` and `dist/afval.html` at `/afval` (clean URLs), so old pretty links work with no redirect at all. A URL ending in a slash (WordPress) is a directory: `dist/afval/index.html` is served at `/afval/`, and `/afval` redirects to it.
+2. **Renamed paths get exact `_redirects` rules generated from the export.** There are no `:splat` captures.
+3. **Query-string URLs (`index.php?page=…`, `news.php?id=…`) cannot be matched by `_redirects`**, which ignores the query string. Rewrite the script path (`/index.php  /legacy.html  200`) to a small page whose script maps the parameters to new paths. Generator and page: [`references/old-urls.md`](references/old-urls.md).
+4. **Add `_headers`.** The static-site canister sends no default security headers (`static-site`).
+5. **Call the backend through generated bindings** (`@icp-sdk/bindgen`, see `icp-cli`): canister id and root key come from the `ic_env` cookie, never a hard-coded host; `opt T` arrives as `T | null`. Sign in with Internet Identity (`internet-identity`) where a method needs a caller.
 
-Retain the old service for the agreed rollback window. Deliver source and exact operating commands, canister IDs/controllers, feature-map evidence, reconciliation/test results, funding/monitoring ownership, recovery steps and remaining gaps. Decommission and dispose of exports only within the owner's authorization. If deployment is blocked, complete independent work and report the blocker accurately.
+## Phase 4: Move the Data
+
+Full commands and the converter are in [`references/data-import.md`](references/data-import.md). The sequence:
+
+1. **Back up** the old database (`mysqldump --single-transaction`); this copy is never modified.
+2. **Export each table as JSON lines**, one object per row, with the columns already renamed to the Motoko field names:
+
+   ```bash
+   mysql --default-character-set=utf8mb4 --batch --raw --skip-column-names -e "
+     SET time_zone = '+00:00';
+     SELECT JSON_OBJECT('legacyId', id, 'slug', slug, 'title', title, 'bodyHtml', body,
+                        'published', published, 'updatedAt', UNIX_TIMESTAMP(updated_at))
+     FROM pages ORDER BY id;" > export/pages.jsonl
+   ```
+
+3. **Convert to Candid batch files** with the stdlib-only `jsonl_to_candid.py` (field types `nat`, `int`, `text`, `bool`, `time`, `variant`, `opt:<type>`):
+
+   ```bash
+   python3 jsonl_to_candid.py export/pages.jsonl batches/pages \
+     legacyId:nat slug:text title:text bodyHtml:text published:bool updatedAt:time
+   ```
+
+4. **Import**, stopping at the first failure (re-running is safe because imports upsert):
+
+   ```bash
+   for f in batches/pages-*.did; do
+     icp canister call backend importPages --args-file "$f" -e ic || { echo "failed at $f"; break; }
+   done
+   ```
+
+5. **Reconcile:** counts from `importCounts` against `SELECT COUNT(*)` per table; spot-check records containing accents, emoji, quotes, tabs and backslashes; compare SHA-256 hashes of migrated files. Keep the results for the hand-over.
+6. **Snapshot** the populated backend before anything risky: `icp canister stop backend -e ic && icp canister snapshot create backend -e ic && icp canister start backend -e ic`.
+
+## Phase 5: Users and Sign-In
+
+- **Do not import password hashes.** Internet Identity cannot use them, and canister memory on standard application subnets is readable by node operators. Import identity data only (legacy id, email, display name, role).
+- **Decide the final domain before real users sign in.** Internet Identity derives a different principal per origin. It treats `ic0.app`, `icp0.io` and `icp.net` as one origin, but a custom domain is a different one, and so is the external host in target B. Moving origins later needs `derivationOrigin` (`internet-identity`, "Serving an app at more than one origin").
+- **Link legacy accounts only with verified proof**, never an email the user merely typed: either the Internet Identity `verified_email` attribute matches the imported address (not `email`, which II does not verify; SSO emails only for domains you list), or a one-time code shown on the old site while both run. See `internet-identity` for attribute verification in the backend.
+- **Staff and editors:** organization SSO through Internet Identity (`ssoDomain`), or an explicit principal allowlist that only controllers can change.
+
+## Phase 6: Cut Over
+
+1. Deploy to the chosen network, subnet or engine; fund it (`cycles-management`, `buy-cycles`). Commit `.icp/data/mappings/ic.ids.json`: it holds the canister IDs.
+2. Run the new site side by side at `https://<frontend-id>.icp.net`. To keep a preview private, use the static-site access protection.
+3. With the owner's go-ahead, **freeze writes** on the old site (maintenance or read-only mode), re-run the export and import (a full re-run is safe; or only rows changed since the last export), and reconcile again.
+4. Snapshot the backend.
+5. Add `.well-known/ic-domains` to the frontend `dir`, register the domain (`custom-domains`), then, with the owner's go-ahead, switch DNS.
+6. **Verify live on the real domain:** every journey in the feature map, sign-in, forms, uploads, old URLs (pretty paths, renamed paths, query-string URLs), the 404 page, and an upgrade of the backend with production data in place.
+7. Keep the old stack read-only and patched for the agreed rollback window, then decommission it and securely delete exports that contain personal data.
+
+**Rollback is two different things.** Redeploying old code does not undo data changes. To return the backend to a known state, stop it and run `icp canister snapshot restore backend <snapshot-id> -e ic`, then start it.
+
+## Security Acceptance
+
+- Link only verifying hostnames (`<id>.icp.net` or the custom domain), never `<id>.raw.icp.net`, which skips certificate checks.
+- Query calls are answered by a single replica. For integrity-sensitive reads use update calls or certified data (`certified-variables`).
+- Consensus protects integrity, not confidentiality. Keep secrets out of canister state; treat personal data as readable by node operators on standard subnets, or encrypt it client-side (`vetkeys`, `encrypted-maps`).
+- Controllers can replace the code. Record who they are, add a backup controller, and protect those keys (`canister-security`).
+- For the frontend, the static-site state hash lets anyone check the deployed files against a rebuild from source (`static-site`).
+- In target B, write down that the external frontend host remains a trust dependency. Do not call that setup tamperproof end to end.
+
+## Hand-Over Evidence
+
+Deliver: live URL(s); canister IDs, network and subnet or engine; source location and the exact build, deploy and import commands; the feature map with evidence per row; reconciliation results; test results, including the populated-state upgrade; controllers and backup controller; cycles balance and monitoring; snapshot IDs and the rollback procedure; and a list of every gap and intentional difference. If access, funding or an owner decision blocks deployment, finish all independent work and name the exact blocker; never report an undeployed build as done.
+
+## Pitfalls
+
+1. **Exporting without `--raw`.** In batch mode the `mysql`/`mariadb` client escapes backslashes, tabs and newlines in values again, so `JSON_OBJECT` output with `\n` or `\"` inside becomes unparseable or, worse, parses with corrupted text. Always pass `--batch --raw --skip-column-names`.
+2. **`opt 5 : nat` in Candid text.** The annotation binds to the whole option and the call fails with `type mismatch: opt 5 cannot be of type nat`. Write `opt (5 : nat)`; the converter does this.
+3. **Sending a whole table in one call.** Requests and responses are limited to 2 MB. Batch imports and paginate reads.
+4. **Non-idempotent imports.** An import that appends instead of upserting creates duplicates when a failed run is repeated. Upsert by legacy id and keep secondary indexes in sync (remove the old index entry when a key such as a slug changes).
+5. **Unguarded import methods.** Every update method is callable by anyone on the internet. Gate imports on `caller.isController()`.
+6. **Expecting `_redirects` to match query strings or capture segments.** Neither is supported: certification needs every response enumerable ahead of time. Build pages at old paths, generate exact rules, and use the mapping page for query-string URLs.
+7. **Rendering pages from the Motoko canister's `http_request`.** Uncertified responses are rejected by verifying gateways, and Motoko has no HTTP-certification library. Serve pages from the static-site canister.
+8. **Importing secrets or password hashes into canister state.** Node operators on standard application subnets can read canister memory.
+9. **Changing the sign-in origin after launch.** Users get new principals on a new origin and lose access to their data unless `derivationOrigin` is configured.
+10. **Wrong time zone on `DATETIME`.** `UNIX_TIMESTAMP()` reads a `DATETIME` in the session time zone. Set `SET time_zone` to the zone the PHP app wrote in (`date.timezone`, `date_default_timezone_set`); `TIMESTAMP` columns are stored in UTC and need no adjustment.
+11. **Double-encoded text.** Older MySQL sites often hold UTF-8 bytes in `latin1` columns; exports then show `Ã©` for `é`. Detect it on spot-checks and fix it in the export query (see `references/data-import.md`), never in the canister afterwards.
+12. **Serialized PHP in columns** (`a:2:{…}` in WordPress `wp_options` and `wp_postmeta`, many plugin tables). Decode during export with the PHP CLI; do not import the raw strings.
+13. **Starting timers in the actor body.** The migration chain disallows side effects there. Arm them from a controller-only method and call it after every deploy.
+14. **Leaving `--default-persistent-actors` in `[moc] args` on moc 2.x.** Actors are persistent by default from moc 2.0.0 and the flag was removed, so the build fails. Keep it only on moc 1.x, where the `icp new` template sets it.
+15. **Replicated POST outcalls to email or payment APIs.** Every replica sends the request. Use an idempotency key or a non-replicated outcall (`https-outcalls`).
+16. **Assuming default security headers.** The static-site canister adds none; declare them in `_headers`.
+17. **Reporting success from exit codes.** An importer that exits 0 has not proven the data is right. Reconcile counts, spot-check records and verify journeys on the live origin.
+18. **Local security tests can lie.** A fresh icp-cli deploys as `anonymous`, then the only controller, so anonymous calls pass `caller.isController()` locally. Hand the canister to a named identity first (`icp canister settings update backend --add-controller <dev> --remove-controller 2vxsx-fae -e local`).
